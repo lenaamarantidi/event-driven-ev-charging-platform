@@ -1,0 +1,25 @@
+{
+  "name": "message-broker",
+  "version": "1.0.0",
+  "description": "Central message broker and event bus for microservices",
+  "main": "src/index.js",
+  "scripts": {
+    "start": "node src/index.js",
+    "dev": "nodemon src/index.js",
+    "test": "jest"
+  },
+  "keywords": [
+    "event-bus",
+    "message-broker",
+    "pubsub"
+  ],
+  "author": "",
+  "license": "MIT",
+  "dependencies": {
+    "axios": "^1.4.0",
+    "express": "^4.18.2"
+  },
+  "devDependencies": {
+    "nodemon": "^2.0.20"
+  }
+}
