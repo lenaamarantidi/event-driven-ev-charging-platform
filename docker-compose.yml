@@ -1,0 +1,325 @@
+version: '3.8'
+
+services:
+  # RabbitMQ Message Broker
+  rabbitmq:
+    image: rabbitmq:3.12-management-alpine
+    container_name: saasplug-rabbitmq
+    ports:
+      - "5672:5672"    # AMQP port
+      - "15672:15672"  # Management UI
+    environment:
+      RABBITMQ_DEFAULT_USER: guest
+      RABBITMQ_DEFAULT_PASS: guest
+    healthcheck:
+      test: rabbitmq-diagnostics -q ping
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - saasplug-network
+    volumes:
+      - rabbitmq-data:/var/lib/rabbitmq
+
+  # MySQL Central Database
+  mysql-central:
+    image: mysql:8.0
+    container_name: saasplug-mysql-central
+    environment:
+      MYSQL_ROOT_PASSWORD: root
+      MYSQL_DATABASE: saas_central
+    ports:
+      - "3306:3306"
+    healthcheck:
+      test: mysqladmin ping -h localhost
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - saasplug-network
+    volumes:
+      - mysql-central-data:/var/lib/mysql
+      - ./databases/central-db.sql:/docker-entrypoint-initdb.d/01-central.sql
+
+  # MySQL Statistics Database
+  mysql-statistics:
+    image: mysql:8.0
+    container_name: saasplug-mysql-statistics
+    environment:
+      MYSQL_ROOT_PASSWORD: root
+      MYSQL_DATABASE: saas_statistics
+    ports:
+      - "3307:3306"
+    healthcheck:
+      test: mysqladmin ping -h localhost
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - saasplug-network
+    volumes:
+      - mysql-statistics-data:/var/lib/mysql
+      - ./databases/statistics-db.sql:/docker-entrypoint-initdb.d/01-statistics.sql
+
+  # MySQL Billing Database
+  mysql-billing:
+    image: mysql:8.0
+    container_name: saasplug-mysql-billing
+    environment:
+      MYSQL_ROOT_PASSWORD: root
+      MYSQL_DATABASE: saas_billing
+    ports:
+      - "3308:3306"
+    healthcheck:
+      test: mysqladmin ping -h localhost
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - saasplug-network
+    volumes:
+      - mysql-billing-data:/var/lib/mysql
+      - ./databases/billing-db.sql:/docker-entrypoint-initdb.d/01-billing.sql
+
+  # MySQL Red Provider Database
+  mysql-red:
+    image: mysql:8.0
+    container_name: saasplug-mysql-red
+    environment:
+      MYSQL_ROOT_PASSWORD: root
+      MYSQL_DATABASE: saas_red
+    ports:
+      - "3309:3306"
+    healthcheck:
+      test: mysqladmin ping -h localhost
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - saasplug-network
+    volumes:
+      - mysql-red-data:/var/lib/mysql
+      - ./databases/provider-db.sql:/docker-entrypoint-initdb.d/01-provider.sql
+
+  # MySQL Green Provider Database
+  mysql-green:
+    image: mysql:8.0
+    container_name: saasplug-mysql-green
+    environment:
+      MYSQL_ROOT_PASSWORD: root
+      MYSQL_DATABASE: saas_green
+    ports:
+      - "3310:3306"
+    healthcheck:
+      test: mysqladmin ping -h localhost
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - saasplug-network
+    volumes:
+      - mysql-green-data:/var/lib/mysql
+      - ./databases/provider-db.sql:/docker-entrypoint-initdb.d/01-provider.sql
+
+  # MySQL Blue Provider Database
+  mysql-blue:
+    image: mysql:8.0
+    container_name: saasplug-mysql-blue
+    environment:
+      MYSQL_ROOT_PASSWORD: root
+      MYSQL_DATABASE: saas_blue
+    ports:
+      - "3311:3306"
+    healthcheck:
+      test: mysqladmin ping -h localhost
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - saasplug-network
+    volumes:
+      - mysql-blue-data:/var/lib/mysql
+      - ./databases/provider-db.sql:/docker-entrypoint-initdb.d/01-provider.sql
+
+  # Central Service
+  central-service:
+    build:
+      context: ./services/central-service
+    container_name: saasplug-central
+    ports:
+      - "3001:3001"
+    environment:
+      PORT: 3001
+      NODE_ENV: production
+      DB_HOST: mysql-central
+      DB_USER: root
+      DB_PASSWORD: root
+      RABBITMQ_URL: amqp://guest:guest@rabbitmq:5672
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+      mysql-central:
+        condition: service_healthy
+    networks:
+      - saasplug-network
+    restart: unless-stopped
+
+  # Status Service
+  status-service:
+    build:
+      context: ./services/status-service
+    container_name: saasplug-status
+    ports:
+      - "3002:3002"
+    environment:
+      PORT: 3002
+      NODE_ENV: production
+      DB_HOST: mysql-central
+      DB_USER: root
+      DB_PASSWORD: root
+      RABBITMQ_URL: amqp://guest:guest@rabbitmq:5672
+      REDPLUG_API_URL: https://davinci.softlab.ntua.gr/saas26/redPlug/api
+      GREENPLUG_API_URL: https://davinci.softlab.ntua.gr/saas26/greenPlug/api
+      BLUEPLUG_API_URL: https://davinci.softlab.ntua.gr/saas26/bluePlug/api
+      CENTRAL_SERVICE_URL: http://central-service:3001
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+      mysql-central:
+        condition: service_healthy
+      central-service:
+        condition: service_started
+    networks:
+      - saasplug-network
+    restart: unless-stopped
+
+  # Reservation Service
+  reservation-service:
+    build:
+      context: ./services/reservation-service
+    container_name: saasplug-reservation
+    ports:
+      - "3003:3003"
+    environment:
+      PORT: 3003
+      NODE_ENV: production
+      DB_HOST: mysql-statistics
+      DB_USER: root
+      DB_PASSWORD: root
+      RABBITMQ_URL: amqp://guest:guest@rabbitmq:5672
+      REDPLUG_API_URL: https://davinci.softlab.ntua.gr/saas26/redPlug/api
+      GREENPLUG_API_URL: https://davinci.softlab.ntua.gr/saas26/greenPlug/api
+      BLUEPLUG_API_URL: https://davinci.softlab.ntua.gr/saas26/bluePlug/api
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+      mysql-statistics:
+        condition: service_healthy
+    networks:
+      - saasplug-network
+    restart: unless-stopped
+
+  # Statistics Service
+  statistics-service:
+    build:
+      context: ./services/statistics-service
+    container_name: saasplug-statistics
+    ports:
+      - "3004:3004"
+    environment:
+      PORT: 3004
+      NODE_ENV: production
+      DB_HOST: mysql-statistics
+      DB_USER: root
+      DB_PASSWORD: root
+      RABBITMQ_URL: amqp://guest:guest@rabbitmq:5672
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+      mysql-statistics:
+        condition: service_healthy
+    networks:
+      - saasplug-network
+    restart: unless-stopped
+
+  # Billing Service
+  billing-service:
+    build:
+      context: ./services/billing-service
+    container_name: saasplug-billing
+    ports:
+      - "3005:3005"
+    environment:
+      PORT: 3005
+      NODE_ENV: production
+      DB_HOST: mysql-billing
+      DB_USER: root
+      DB_PASSWORD: root
+      RABBITMQ_URL: amqp://guest:guest@rabbitmq:5672
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+      mysql-billing:
+        condition: service_healthy
+    networks:
+      - saasplug-network
+    restart: unless-stopped
+
+  # Map Service
+  map-service:
+    build:
+      context: ./services/map-service
+    container_name: saasplug-map
+    ports:
+      - "3006:3006"
+    environment:
+      PORT: 3006
+      NODE_ENV: production
+      DB_HOST: mysql-central
+      DB_USER: root
+      DB_PASSWORD: root
+    depends_on:
+      mysql-central:
+        condition: service_healthy
+    networks:
+      - saasplug-network
+    restart: unless-stopped
+
+  # Sync Service (no port, runs as background worker)
+  sync-service:
+    build:
+      context: ./services/sync-service
+    container_name: saasplug-sync
+    environment:
+      NODE_ENV: production
+      DB_HOST: mysql-central
+      DB_USER: root
+      DB_PASSWORD: root
+      RABBITMQ_URL: amqp://guest:guest@rabbitmq:5672
+      REDPLUG_API_URL: https://davinci.softlab.ntua.gr/saas26/redPlug/api
+      GREENPLUG_API_URL: https://davinci.softlab.ntua.gr/saas26/greenPlug/api
+      BLUEPLUG_API_URL: https://davinci.softlab.ntua.gr/saas26/bluePlug/api
+      STATUS_SERVICE_URL: http://status-service:3002
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+      mysql-central:
+        condition: service_healthy
+      status-service:
+        condition: service_started
+    networks:
+      - saasplug-network
+    restart: unless-stopped
+
+networks:
+  saasplug-network:
+    driver: bridge
+
+volumes:
+  rabbitmq-data:
+  mysql-central-data:
+  mysql-statistics-data:
+  mysql-billing-data:
+  mysql-red-data:
+  mysql-green-data:
+  mysql-blue-data:

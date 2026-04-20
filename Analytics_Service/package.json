@@ -1,0 +1,25 @@
+{
+  "name": "analytics-service",
+  "version": "1.0.0",
+  "description": "Usage analytics and reporting service",
+  "main": "src/index.js",
+  "scripts": {
+    "start": "node src/index.js",
+    "dev": "nodemon src/index.js",
+    "test": "jest"
+  },
+  "dependencies": {
+    "express": "^4.18.2",
+    "uuid": "^9.0.0",
+    "pg": "^8.11.0",
+    "axios": "^1.4.0",
+    "dotenv": "^16.0.3"
+  },
+  "devDependencies": {
+    "nodemon": "^2.0.20",
+    "jest": "^29.5.0"
+  },
+  "keywords": ["analytics", "reporting", "metrics", "microservice"],
+  "author": "SaaS Plug",
+  "license": "MIT"
+}

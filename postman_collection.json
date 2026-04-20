@@ -1,0 +1,350 @@
+{
+  "info": {
+    "name": "SaaS Plug - Multi-Provider API",
+    "description": "Postman collection for testing the unified API with provider adapters",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "item": [
+    {
+      "name": "API Gateway",
+      "item": [
+        {
+          "name": "Health Check All Services",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "http://localhost:8000/health",
+              "protocol": "http",
+              "host": ["localhost"],
+              "port": "8000",
+              "path": ["health"]
+            }
+          }
+        },
+        {
+          "name": "Gateway Info",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "http://localhost:8000/",
+              "protocol": "http",
+              "host": ["localhost"],
+              "port": "8000"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Points Service",
+      "item": [
+        {
+          "name": "Get All Points",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "http://localhost:3001/api/points",
+              "protocol": "http",
+              "host": ["localhost"],
+              "port": "3001",
+              "path": ["api", "points"]
+            }
+          }
+        },
+        {
+          "name": "Get Available Points",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "http://localhost:3001/api/points?status=available",
+              "protocol": "http",
+              "host": ["localhost"],
+              "port": "3001",
+              "path": ["api", "points"],
+              "query": [{"key": "status", "value": "available"}]
+            }
+          }
+        },
+        {
+          "name": "Get Points by Provider",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "http://localhost:3001/api/points?provider=redPlug",
+              "protocol": "http",
+              "host": ["localhost"],
+              "port": "3001",
+              "path": ["api", "points"],
+              "query": [{"key": "provider", "value": "redPlug"}]
+            }
+          }
+        },
+        {
+          "name": "Get Specific Point from RedPlug",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "http://localhost:3001/api/points/redPlug/1",
+              "protocol": "http",
+              "host": ["localhost"],
+              "port": "3001",
+              "path": ["api", "points", "redPlug", "1"]
+            }
+          }
+        },
+        {
+          "name": "Get Specific Point from GreenPlug",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "http://localhost:3001/api/points/greenPlug/1",
+              "protocol": "http",
+              "host": ["localhost"],
+              "port": "3001",
+              "path": ["api", "points", "greenPlug", "1"]
+            }
+          }
+        },
+        {
+          "name": "Get Specific Point from BluePlug",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "http://localhost:3001/api/points/bluePlug/1",
+              "protocol": "http",
+              "host": ["localhost"],
+              "port": "3001",
+              "path": ["api", "points", "bluePlug", "1"]
+            }
+          }
+        },
+        {
+          "name": "Search Points with Filters",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "http://localhost:3001/api/search?status=available&provider=redPlug&capacity_min=20",
+              "protocol": "http",
+              "host": ["localhost"],
+              "port": "3001",
+              "path": ["api", "search"],
+              "query": [
+                {"key": "status", "value": "available"},
+                {"key": "provider", "value": "redPlug"},
+                {"key": "capacity_min", "value": "20"}
+              ]
+            }
+          }
+        },
+        {
+          "name": "Get Statistics",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "http://localhost:3001/api/statistics",
+              "protocol": "http",
+              "host": ["localhost"],
+              "port": "3001",
+              "path": ["api", "statistics"]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Status Service",
+      "item": [
+        {
+          "name": "Check All Providers Status",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "http://localhost:3002/api/status",
+              "protocol": "http",
+              "host": ["localhost"],
+              "port": "3002",
+              "path": ["api", "status"]
+            }
+          }
+        },
+        {
+          "name": "Check RedPlug Status",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "http://localhost:3002/api/status/redPlug",
+              "protocol": "http",
+              "host": ["localhost"],
+              "port": "3002",
+              "path": ["api", "status", "redPlug"]
+            }
+          }
+        },
+        {
+          "name": "Check GreenPlug Status",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "http://localhost:3002/api/status/greenPlug",
+              "protocol": "http",
+              "host": ["localhost"],
+              "port": "3002",
+              "path": ["api", "status", "greenPlug"]
+            }
+          }
+        },
+        {
+          "name": "Check BluePlug Status",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "http://localhost:3002/api/status/bluePlug",
+              "protocol": "http",
+              "host": ["localhost"],
+              "port": "3002",
+              "path": ["api", "status", "bluePlug"]
+            }
+          }
+        },
+        {
+          "name": "Get Detailed Point Status",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "http://localhost:3002/api/status/detailed/redPlug/1",
+              "protocol": "http",
+              "host": ["localhost"],
+              "port": "3002",
+              "path": ["api", "status", "detailed", "redPlug", "1"]
+            }
+          }
+        },
+        {
+          "name": "Ping Status Service",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "http://localhost:3002/api/status/ping",
+              "protocol": "http",
+              "host": ["localhost"],
+              "port": "3002",
+              "path": ["api", "status", "ping"]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Reservation Service",
+      "item": [
+        {
+          "name": "Reserve Point from RedPlug",
+          "request": {
+            "method": "POST",
+            "header": [{"key": "Content-Type", "value": "application/json"}],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"provider\": \"redPlug\",\n  \"pointid\": \"1\",\n  \"minutes\": 30,\n  \"userId\": \"user123\"\n}"
+            },
+            "url": {
+              "raw": "http://localhost:3003/api/reservations",
+              "protocol": "http",
+              "host": ["localhost"],
+              "port": "3003",
+              "path": ["api", "reservations"]
+            }
+          }
+        },
+        {
+          "name": "Reserve Point from GreenPlug",
+          "request": {
+            "method": "POST",
+            "header": [{"key": "Content-Type", "value": "application/json"}],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"provider\": \"greenPlug\",\n  \"pointid\": \"1\",\n  \"minutes\": 30,\n  \"userId\": \"user123\"\n}"
+            },
+            "url": {
+              "raw": "http://localhost:3003/api/reservations",
+              "protocol": "http",
+              "host": ["localhost"],
+              "port": "3003",
+              "path": ["api", "reservations"]
+            }
+          }
+        },
+        {
+          "name": "Reserve Point from BluePlug",
+          "request": {
+            "method": "POST",
+            "header": [{"key": "Content-Type", "value": "application/json"}],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"provider\": \"bluePlug\",\n  \"pointid\": \"1\",\n  \"minutes\": 30,\n  \"userId\": \"user123\"\n}"
+            },
+            "url": {
+              "raw": "http://localhost:3003/api/reservations",
+              "protocol": "http",
+              "host": ["localhost"],
+              "port": "3003",
+              "path": ["api", "reservations"]
+            }
+          }
+        },
+        {
+          "name": "Get All Reservations",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "http://localhost:3003/api/reservations",
+              "protocol": "http",
+              "host": ["localhost"],
+              "port": "3003",
+              "path": ["api", "reservations"]
+            }
+          }
+        },
+        {
+          "name": "Get Reservations by Status",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "http://localhost:3003/api/reservations?status=success",
+              "protocol": "http",
+              "host": ["localhost"],
+              "port": "3003",
+              "path": ["api", "reservations"],
+              "query": [{"key": "status", "value": "success"}]
+            }
+          }
+        },
+        {
+          "name": "Get Reservations by Provider",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "http://localhost:3003/api/reservations/by-provider/redPlug",
+              "protocol": "http",
+              "host": ["localhost"],
+              "port": "3003",
+              "path": ["api", "reservations", "by-provider", "redPlug"]
+            }
+          }
+        },
+        {
+          "name": "Get Reservation Statistics",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "http://localhost:3003/api/reservations/statistics",
+              "protocol": "http",
+              "host": ["localhost"],
+              "port": "3003",
+              "path": ["api", "reservations", "statistics"]
+            }
+          }
+        }
+      ]
+    }
+  ]
+}
