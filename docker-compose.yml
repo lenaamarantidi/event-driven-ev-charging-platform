@@ -311,6 +311,29 @@ services:
       - saasplug-network
     restart: unless-stopped
 
+  # Provider API Service (OpenAPI 3.1.0)
+  provider-api-service:
+    build:
+      context: .
+      dockerfile: Provider_API_Service/Dockerfile
+    container_name: saasplug-provider-api
+    ports:
+      - "3200:3200"
+    environment:
+      PORT: 3200
+      NODE_ENV: production
+      REDPLUG_BASE_URL: https://davinci.softlab.ntua.gr/saas26/redPlug/api
+      GREENPLUG_BASE_URL: https://davinci.softlab.ntua.gr/saas26/greenPlug/api
+      BLUEPLUG_BASE_URL: https://davinci.softlab.ntua.gr/saas26/bluePlug/api
+    networks:
+      - saasplug-network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3200/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+
 networks:
   saasplug-network:
     driver: bridge

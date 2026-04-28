@@ -27,6 +27,7 @@ const SERVICES = {
   points: process.env.POINTS_SERVICE_URL || 'http://localhost:3001',
   auth: process.env.AUTH_SERVICE_URL || 'http://localhost:3100',
   providers: process.env.PROVIDER_MGMT_SERVICE_URL || 'http://localhost:3101',
+  providerApi: process.env.PROVIDER_API_SERVICE_URL || 'http://localhost:3200',
   status: process.env.STATUS_SERVICE_URL || 'http://localhost:3102',
   collector: process.env.COLLECTOR_SERVICE_URL || 'http://localhost:3104',
   map: process.env.MAP_SERVICE_URL || 'http://localhost:3105',
@@ -52,6 +53,33 @@ app.use('/api/auth', httpProxy(SERVICES.auth, {
 app.use('/api/providers', httpProxy(SERVICES.providers, {
   proxyReqPathResolver: (req) => {
     return `/providers${req.url}`;
+  }
+}));
+
+/**
+ * Route to Provider API Service (OpenAPI 3.1.0 endpoints)
+ */
+app.use('/redPlug', httpProxy(SERVICES.providerApi, {
+  proxyReqPathResolver: (req) => {
+    return `/redPlug${req.url}`;
+  }
+}));
+
+app.use('/greenPlug', httpProxy(SERVICES.providerApi, {
+  proxyReqPathResolver: (req) => {
+    return `/greenPlug${req.url}`;
+  }
+}));
+
+app.use('/bluePlug', httpProxy(SERVICES.providerApi, {
+  proxyReqPathResolver: (req) => {
+    return `/bluePlug${req.url}`;
+  }
+}));
+
+app.use('/docs', httpProxy(SERVICES.providerApi, {
+  proxyReqPathResolver: (req) => {
+    return `/docs${req.url}`;
   }
 }));
 
@@ -177,7 +205,7 @@ app.get('/', (req, res) => {
   res.json({
     name: 'SaaS Plug - API Gateway',
     version: '1.0.0',
-    description: 'Main entry point for all 8 microservices',
+    description: 'Main entry point for all microservices',
     timestamp: new Date().toISOString(),
     endpoints: {
       'POST /api/auth/register': 'User registration',
@@ -195,9 +223,25 @@ app.get('/', (req, res) => {
       'GET /api/billing/invoices': 'Get invoices',
       'POST /api/events/publish': 'Publish event (Message Broker)',
       'POST /api/webhooks/subscribe': 'Subscribe to events',
-      'GET /health': 'Health check all services'
+      'GET /health': 'Health check all services',
+      'GET /docs': 'List provider OpenAPI specs',
+      'GET /docs/{provider}': 'Get provider OpenAPI spec',
+      'GET /redPlug/api/points': 'List redPlug charging points',
+      'GET /redPlug/api/point/{pointid}': 'Get redPlug point details',
+      'POST /redPlug/api/reserve/{pointid}': 'Reserve redPlug point',
+      'GET /greenPlug/api/chargingPoints': 'List greenPlug charging points',
+      'GET /greenPlug/api/chargingPoints/{pointid}': 'Get greenPlug point details',
+      'POST /greenPlug/api/chargingPoints/{pointid}/reservations': 'Create greenPlug reservation',
+      'GET /bluePlug/api/locations': 'List bluePlug locations',
+      'GET /bluePlug/api/location/{pointid}/status': 'Get bluePlug location status',
+      'POST /bluePlug/api/location/{pointid}/hold': 'Reserve bluePlug charger'
     },
-    services: SERVICES
+    services: SERVICES,
+    providerApiDocumentation: {
+      url: '/docs',
+      specification: 'OpenAPI 3.1.0',
+      providers: ['redPlug', 'greenPlug', 'bluePlug']
+    }
   });
 });
 
