@@ -31,7 +31,7 @@ cd saas26-11
 ./scripts/install-all.sh
 
 # Or manually:
-for dir in Auth_Service Provider_Management_Service Collector_Service Map_UI_Service Analytics_Service Payment_Service Billing_Service Status_Service message_broker API_Gateway; do
+for dir in Auth_Service Provider_Management_Service Collector_Service Map_UI_Service Analytics_Service Payment_Service Billing_Service message_broker API_Gateway; do
   cd $dir && npm install && cd ..
 done
 ```
@@ -92,16 +92,13 @@ PORT=3108
 NODE_ENV=development
 ```
 
-**Status_Service/.env**:
+**message_broker/.env**:
 ```
-PORT=3102
-REDPLUG_BASE_URL=https://davinci.softlab.ntua.gr/saas26/redPlug/api
-GREENPLUG_BASE_URL=https://davinci.softlab.ntua.gr/saas26/greenPlug/api
-BLUEPLUG_BASE_URL=https://davinci.softlab.ntua.gr/saas26/bluePlug/api
+PORT=3003
 NODE_ENV=development
 ```
 
-**message_broker/.env**:
+**API_Gateway/.env**:
 ```
 PORT=3003
 NODE_ENV=development
@@ -113,7 +110,6 @@ PORT=8000
 POINTS_SERVICE_URL=http://localhost:3001
 AUTH_SERVICE_URL=http://localhost:3100
 PROVIDER_MGMT_SERVICE_URL=http://localhost:3101
-STATUS_SERVICE_URL=http://localhost:3102
 COLLECTOR_SERVICE_URL=http://localhost:3104
 MAP_SERVICE_URL=http://localhost:3105
 ANALYTICS_SERVICE_URL=http://localhost:3106
@@ -152,9 +148,6 @@ cd Payment_Service && npm start
 cd Billing_Service && npm start
 
 # Terminal 8
-cd Status_Service && npm start
-
-# Terminal 9
 cd message_broker && npm start
 
 # Terminal 10 (START LAST!)
@@ -180,10 +173,9 @@ Create `package.json` in root:
     "start:analytics": "cd Analytics_Service && npm start",
     "start:payments": "cd Payment_Service && npm start",
     "start:billing": "cd Billing_Service && npm start",
-    "start:status": "cd Status_Service && npm start",
     "start:broker": "cd message_broker && npm start",
     "start:gateway": "cd API_Gateway && npm start",
-    "start:all": "npm-run-all --parallel start:auth start:providers start:collector start:map start:analytics start:payments start:billing start:status start:broker start:gateway"
+    "start:all": "npm-run-all --parallel start:auth start:providers start:collector start:map start:analytics start:payments start:billing start:broker start:gateway"
   }
 }
 ```
@@ -433,7 +425,6 @@ CREATE DATABASE payment_service;
 CREATE DATABASE analytics_service;
 CREATE DATABASE provider_mgmt_service;
 CREATE DATABASE map_service;
-CREATE DATABASE status_service;
 
 # Run migrations (when implemented)
 npm run migrate

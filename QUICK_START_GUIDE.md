@@ -14,10 +14,6 @@ Run this in each service directory:
 cd Points_Service
 npm install
 
-# Status Service  
-cd ../Status_Service
-npm install
-
 # Reservation Service
 cd ../Reservation_Service
 npm install
@@ -38,14 +34,7 @@ npm start
 # Output: Points Service listening on port 3001
 ```
 
-### Terminal 2 - Status Service
-```bash
-cd Status_Service
-npm start
-# Output: Status Service listening on port 3002
-```
-
-### Terminal 3 - Reservation Service
+### Terminal 2 - Reservation Service
 ```bash
 cd Reservation_Service
 npm start
@@ -131,7 +120,6 @@ The API Gateway routes requests to microservices:
 
 - **Port 8000** - Unified API entry point
   - `/api/points/*` → Points Service (3001)
-  - `/api/status/*` → Status Service (3002)  
   - `/api/reservations/*` → Reservation Service (3003)
   - `/health` → Health check all services
 
@@ -183,12 +171,16 @@ curl http://localhost:3001/api/statistics
 - `GET /api/search` - Advanced search with filters
 - `GET /api/statistics` - Aggregate statistics
 
-**Status Service (3002)**
-- `GET /api/status` - Check all providers
-- `GET /api/status/:provider` - Check specific provider
-- `GET /api/status/detailed/:provider/:pointid` - Get detailed status
-
 **Reservation Service (3003)**
+- `POST /api/reservations` - Create reservation
+- `GET /api/reservations` - List reservations
+- `GET /api/reservations/by-provider/:provider` - Filter by provider
+- `GET /api/reservations/statistics` - Reservation stats
+
+---
+
+**API Gateway (8000)**
+- `GET /health` - Health check for all services
 - `POST /api/reservations` - Create reservation
 - `GET /api/reservations` - List reservations
 - `GET /api/reservations/by-provider/:provider` - Filter by provider

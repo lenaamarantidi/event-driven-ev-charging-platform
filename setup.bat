@@ -49,29 +49,6 @@ if exist "Points_Service" (
 )
 echo.
 
-REM Status Service
-echo [SETUP] Installing dependencies for Status_Service...
-if exist "Status_Service" (
-    cd Status_Service
-    if exist "package.json" (
-        npm install
-        if %errorlevel% equ 0 (
-            echo [OK] Status_Service dependencies installed
-        ) else (
-            echo [ERROR] Failed to install Status_Service dependencies
-            exit /b 1
-        )
-    ) else (
-        echo [ERROR] package.json not found in Status_Service
-        exit /b 1
-    )
-    cd ..
-) else (
-    echo [ERROR] Status_Service directory not found
-    exit /b 1
-)
-echo.
-
 REM Reservation Service
 echo [SETUP] Installing dependencies for Reservation_Service...
 if exist "Reservation_Service" (
@@ -128,11 +105,11 @@ echo.
 echo 1. Start Points Service (open new Command Prompt):
 echo    cd Points_Service ^&^& npm start
 echo.
-echo 2. Start Status Service (open new Command Prompt):
-echo    cd Status_Service ^&^& npm start
-echo.
-echo 3. Start Reservation Service (open new Command Prompt):
+echo 2. Start Reservation Service (open new Command Prompt):
 echo    cd Reservation_Service ^&^& npm start
+echo.
+echo 3. Start API Gateway (open new Command Prompt):
+echo    cd API_Gateway ^&^& npm start
 echo.
 echo 4. Start API Gateway (open new Command Prompt):
 echo    cd API_Gateway ^&^& npm start

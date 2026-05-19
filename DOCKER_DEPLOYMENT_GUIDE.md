@@ -18,9 +18,6 @@ docker-compose up -d --build
 # Build Points Service image
 docker build -f Points_Service/Dockerfile -t saas-plug-points:latest .
 
-# Build Status Service image
-docker build -f Status_Service/Dockerfile -t saas-plug-status:latest .
-
 # Build Reservation Service image
 docker build -f Reservation_Service/Dockerfile -t saas-plug-reservation:latest .
 
@@ -37,12 +34,6 @@ docker run -p 3001:3001 \
   -e LOG_LEVEL=info \
   saas-plug-points:latest
 
-# Run Status Service
-docker run -p 3002:3002 \
-  -e NODE_ENV=production \
-  -e LOG_LEVEL=info \
-  saas-plug-status:latest
-
 # Run Reservation Service
 docker run -p 3003:3003 \
   -e NODE_ENV=production \
@@ -53,7 +44,6 @@ docker run -p 3003:3003 \
 docker run -p 8000:8000 \
   -e NODE_ENV=production \
   -e POINTS_SERVICE_URL=http://docker.for.mac.host.internal:3001 \
-  -e STATUS_SERVICE_URL=http://docker.for.mac.host.internal:3002 \
   -e RESERVATION_SERVICE_URL=http://docker.for.mac.host.internal:3003 \
   saas-plug-gateway:latest
 ```
@@ -353,10 +343,10 @@ kill -9 <PID>
 docker network inspect <network-name>
 
 # Test DNS resolution inside container
-docker-compose exec points-service nslookup status-service
+docker-compose exec points-service nslookup reservation-service
 
 # Ping another service
-docker-compose exec points-service ping -c 3 status-service
+docker-compose exec points-service ping -c 3 reservation-service
 ```
 
 ### Memory issues

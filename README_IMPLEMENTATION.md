@@ -131,7 +131,6 @@ bash setup.sh
 
 # Or manually
 cd Points_Service && npm install
-cd ../Status_Service && npm install
 cd ../Reservation_Service && npm install
 cd ../API_Gateway && npm install
 ```
@@ -142,13 +141,10 @@ cd ../API_Gateway && npm install
 # Terminal 1 - Points Service
 cd Points_Service && npm start
 
-# Terminal 2 - Status Service  
-cd Status_Service && npm start
-
-# Terminal 3 - Reservation Service
+# Terminal 2 - Reservation Service
 cd Reservation_Service && npm start
 
-# Terminal 4 - API Gateway
+# Terminal 3 - API Gateway
 cd API_Gateway && npm start
 ```
 
@@ -163,7 +159,6 @@ curl http://localhost:8000/health
 #   "status": "healthy",
 #   "services": {
 #     "pointsService": { "status": "ok", "port": 3001 },
-#     "statusService": { "status": "ok", "port": 3002 },
 #     "reservationService": { "status": "ok", "port": 3003 }
 #   }
 # }
@@ -193,7 +188,6 @@ saas26-11/
 │   ├── package.json
 │   └── Dockerfile
 │
-├── Status_Service/              # Provider health monitoring
 │   ├── src/
 │   │   ├── index.js
 │   │   └── adapters/
@@ -260,24 +254,37 @@ saas26-11/
 
 ---
 
-### Status Service (Port 3002)
+### Reservation Service (Port 3003)
 
-**Monitors health and availability of all providers**
+**Handles reservations across all providers**
 
 **Key Endpoints**:
-- `GET /api/status` - Check all providers
-- `GET /api/status/:provider` - Check specific provider
-- `GET /api/status/detailed/:provider/:pointid` - Point-level status
+- `POST /api/reservations` - Create reservation
+- `GET /api/reservations` - List reservations
+- `GET /api/reservations/by-provider/:provider` - Filter by provider
+- `GET /api/reservations/statistics` - Reservation metrics
 
 **Key Features**:
-- Periodic provider health checks
-- Real-time availability status
-- Detailed point status information
-- Provider-specific error reporting
+- Create reservations on any provider
+- Track reservation status
+- Provider-specific reservation normalization
+- Reservation history and statistics
 
 ---
 
-### Reservation Service (Port 3003)
+### API Gateway (Port 8000)
+
+**Single entry point routing to all microservices**
+
+**Key Endpoints**:
+- `/api/points/*` → Points Service (3001)
+- `/api/reservations/*` → Reservation Service (3003)
+- `GET /health` - Health check for all services
+
+**Key Features**:
+- HTTP proxy-based routing via `express-http-proxy`
+- Centralized health monitoring
+- Request/response logging
 
 **Handles reservations across all providers**
 
@@ -529,7 +536,6 @@ docker logs <service-name>
 docker network inspect saas26-11_saas-network
 
 # Verify service DNS resolution
-docker-compose exec points-service nslookup status-service
 ```
 
 See [DOCKER_DEPLOYMENT_GUIDE.md](DOCKER_DEPLOYMENT_GUIDE.md#-troubleshooting-docker-issues) for more troubleshooting.

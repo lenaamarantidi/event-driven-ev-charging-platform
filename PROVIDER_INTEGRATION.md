@@ -83,7 +83,6 @@ curl http://localhost:8000/health
 
 # Routing examples
 GET  http://localhost:8000/api/points         → Points Service (3001)
-GET  http://localhost:8000/api/status         → Status Service (3002)
 POST http://localhost:8000/api/reservations   → Reservation Service (3003)
 GET  http://localhost:8000/api/map            → Map Service (3006)
 ```
@@ -116,33 +115,33 @@ GET /api/statistics
 # Returns: { total_points, by_provider, by_status, avg_capacity_kw }
 ```
 
-### 3. **Status Service** (Port 3002)
-Κάνει αιτήσεις στα provider APIs για κατάσταση
+### 3. **Reservation Service** (Port 3003)
+Κρατήσεις σημείων σε όλους τους παρόχους
 
 ```bash
-# Status check όλων των παρόχων
-GET /api/status
+# Δημιουργία κράτησης
+POST /api/reservations
+{
+  "provider": "redPlug",      # ή "greenPlug" ή "bluePlug"
+  "pointid": "1",
+  "minutes": 30,              # optional
+  "userId": "user123"         # optional
+}
+
 # Returns:
 # {
-#   "redPlug": { online: true, total_points: 85, by_status: {...} },
-#   "greenPlug": { online: true, total_points: 90, by_status: {...} },
-#   "bluePlug": { online: true, total_points: 75, by_status: {...} }
+#   "reservation_id": "uuid",
+#   "success": true,
+#   "status": "reserved",
+#   "reservation_end_time": "2025-11-10 19:00"
 # }
 
-# Status check συγκεκριμένου παρόχου
-GET /api/status/redPlug
-GET /api/status/greenPlug
-GET /api/status/bluePlug
+# Λήψη όλων των κρατήσεων
+GET /api/reservations
 
-# Detailed status συγκεκριμένου σημείου
-GET /api/status/detailed/redPlug/1
-GET /api/status/detailed/greenPlug/42
-
-# Simple ping (δεν κάνει actual requests)
-GET /api/status/ping
+# Φιλτραρισμένες κρατήσεις
+GET /api/reservations?provider=redPlug
 ```
-
-### 4. **Reservation Service** (Port 3003)
 Κρατήσεις σημείων σε όλους τους παρόχους
 
 ```bash
@@ -187,13 +186,6 @@ GET /api/reservations/statistics
 ### File Structure
 ```
 Points_Service/
-├── src/
-│   ├── index.js
-│   └── adapters/
-│       └── providerAdapter.js
-└── package.json
-
-Status_Service/
 ├── src/
 │   ├── index.js
 │   └── adapters/
@@ -301,7 +293,6 @@ BLUEPLUG_API_URL=https://davinci.softlab.ntua.gr/saas26/bluePlug/api
 
 # Service URLs (for inter-service communication)
 POINTS_SERVICE_URL=http://localhost:3001
-STATUS_SERVICE_URL=http://localhost:3002
 RESERVATION_SERVICE_URL=http://localhost:3003
 
 # Server Ports

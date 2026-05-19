@@ -4,7 +4,6 @@
 
 ### 1. Core Microservices Architecture ✅
 - **Points Service** (Port 3001) - Charging point aggregation and search
-- **Status Service** (Port 3002) - Provider health monitoring
 - **Reservation Service** (Port 3003) - Reservation management
 - **API Gateway** (Port 8000) - Unified entry point with HTTP routing
 
@@ -188,8 +187,8 @@ curl http://localhost:8000/health
 | Provider Filtering | ✅ Complete | Points_Service |
 | Advanced Search | ✅ Complete | Points_Service |
 | Statistics | ✅ Complete | Points_Service |
-| Health Checks | ✅ Complete | Status_Service |
-| Provider Status | ✅ Complete | Status_Service |
+| Health Checks | ✅ Complete | Points_Service, Reservation_Service |
+| Provider Status | ✅ Complete | Points_Service, Reservation_Service |
 | Reservations | ✅ Complete | Reservation_Service |
 | API Gateway | ✅ Complete | API_Gateway |
 | Docker Support | ✅ Complete | docker-compose.yml |

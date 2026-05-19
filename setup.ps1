@@ -53,7 +53,6 @@ Write-Host "Installing dependencies for all services..." -ForegroundColor Cyan
 Write-Host ""
 
 Install-Service "Points_Service"
-Install-Service "Status_Service"
 Install-Service "Reservation_Service"
 Install-Service "API_Gateway"
 
@@ -68,10 +67,10 @@ Write-Host ""
 Write-Host "1. Start Points Service (open new PowerShell window):" -ForegroundColor White
 Write-Host "   cd Points_Service; npm start" -ForegroundColor Gray
 Write-Host ""
-Write-Host "2. Start Status Service (open new PowerShell window):" -ForegroundColor White
-Write-Host "   cd Status_Service; npm start" -ForegroundColor Gray
+Write-Host "2. Start Reservation Service (open new PowerShell window):" -ForegroundColor White
+Write-Host "   cd Reservation_Service; npm start" -ForegroundColor Gray
 Write-Host ""
-Write-Host "3. Start Reservation Service (open new PowerShell window):" -ForegroundColor White
+Write-Host "3. Start API Gateway (open new PowerShell window):" -ForegroundColor White
 Write-Host "   cd Reservation_Service; npm start" -ForegroundColor Gray
 Write-Host ""
 Write-Host "4. Start API Gateway (open new PowerShell window):" -ForegroundColor White
@@ -84,5 +83,5 @@ Write-Host "See QUICK_START_GUIDE.md for detailed instructions." -ForegroundColo
 Write-Host ""
 
 Write-Host "Or run this command to start all services in new windows:" -ForegroundColor Yellow
-Write-Host "powershell -Command { @('Points_Service', 'Status_Service', 'Reservation_Service', 'API_Gateway') | ForEach-Object { Start-Process powershell -ArgumentList ""-NoExit -Command cd '$_'; npm start"" } }" -ForegroundColor Gray
+Write-Host "powershell -Command { @('Points_Service', 'Reservation_Service', 'API_Gateway') | ForEach-Object { Start-Process powershell -ArgumentList ""-NoExit -Command cd '$_'; npm start"" } }" -ForegroundColor Gray
 Write-Host ""
