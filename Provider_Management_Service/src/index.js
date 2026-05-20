@@ -1,24 +1,39 @@
 /**
  * Provider Management Service
- * Manages provider registration, updates, and federation across RedPlug, GreenPlug, BluePlug
+ * Manages provider registration, updates, and federation
+ * Uses MariaDB for persistence
  * Port: 3101
  */
 
 const express = require('express');
-const { ProviderAdapterFactory } = require('./adapters/providerAdapter');
-const { v4: uuidv4 } = require('uuid');
+const mysql = require('mysql2/promise');
+const bcrypt = require('bcryptjs');
+const axios = require('axios');
+require('dotenv').config();
 
 const app = express();
 app.use(express.json());
 
 const PORT = process.env.PORT || 3101;
 
-// In-memory provider registry (replace with DB in production)
-const providerRegistry = new Map();
-const providerMappings = new Map(); // saas-id => provider-specific-ids
+// ============== DATABASE CONFIGURATION ==============
+
+const pool = mysql.createPool({
+  host: process.env.DB_HOST || 'mariadb',
+  user: process.env.DB_USER || 'root',
+  password: process.env.DB_PASSWORD || 'root',
+  database: process.env.DB_NAME || 'provider_db',
+  waitForConnections: true,
+  connectionLimit: 10,
+  queueLimit: 0
+});
+
+pool.on('error', (err) => {
+  console.error('Pool error:', err.message);
+});
 
 /**
- * Middleware: Verify auth (simplified for demo)
+ * Middleware: Verify auth token (simplified for demo)
  */
 function verifyAuth(req, res, next) {
   const token = req.headers.authorization?.split(' ')[1];
@@ -30,144 +45,101 @@ function verifyAuth(req, res, next) {
 
 /**
  * POST /providers/register
- * Register a new provider across all platform providers
+ * Register a new provider
  */
 app.post('/providers/register', verifyAuth, async (req, res) => {
+  const conn = await pool.getConnection();
   try {
     const {
-      name,
-      type,
-      contactEmail,
-      phone,
-      website,
-      location,
-      externalIds // { redPlug: 'id1', greenPlug: 'id2', bluePlug: 'id3' }
+      company_name,
+      password,
+      TIN,
+      email,
+      contact_number,
+      API_endpoint,
+      API_key
     } = req.body;
 
-    if (!name || !contactEmail) {
-      return res.status(400).json({ error: 'Name and contact email required' });
+    if (!company_name || !password || !TIN || !email || !API_endpoint || !API_key) {
+      return res.status(400).json({ error: 'Missing required fields' });
     }
 
-    const saasProviderId = uuidv4();
-    const providerData = {
-      id: saasProviderId,
-      name,
-      type: type || 'charging_network',
-      contactEmail,
-      phone,
-      website,
-      location,
-      externalIds: externalIds || {},
-      status: 'active',
-      createdAt: new Date(),
-      updatedAt: new Date()
-    };
+    const passwordHash = await bcrypt.hash(password, 10);
 
-    // Register on external providers if credentials provided
-    const registrationResults = {};
-
-    for (const [providerName, providerId] of Object.entries(externalIds || {})) {
-      try {
-        const adapter = ProviderAdapterFactory.createAdapter(providerName);
-        const registeredProvider = await adapter.registerProvider(providerData);
-        registrationResults[providerName] = {
-          status: 'registered',
-          externalId: registeredProvider.id
-        };
-        providerData.externalIds[providerName] = registeredProvider.id;
-      } catch (err) {
-        registrationResults[providerName] = {
-          status: 'failed',
-          error: err.message
-        };
-      }
-    }
-
-    providerRegistry.set(saasProviderId, providerData);
-    providerMappings.set(saasProviderId, providerData.externalIds);
+    await conn.query(
+      `INSERT INTO providers (company_name, password_hash, TIN, email, contact_number, API_endpoint, API_key)
+       VALUES (?, ?, ?, ?, ?, ?, ?)`,
+      [company_name, passwordHash, TIN, email, contact_number || null, API_endpoint, API_key]
+    );
 
     res.status(201).json({
       message: 'Provider registered successfully',
-      provider: providerData,
-      registrationDetails: registrationResults
+      provider: {
+        company_name,
+        email,
+        API_endpoint
+      }
     });
   } catch (err) {
-    console.error('Provider registration error:', err);
+    console.error('Provider registration error:', err.message);
+    if (err.code === 'ER_DUP_ENTRY') {
+      return res.status(409).json({ error: 'Provider or field already exists' });
+    }
     res.status(500).json({ error: 'Provider registration failed', message: err.message });
+  } finally {
+    conn.release();
   }
 });
 
 /**
  * GET /providers
- * List all registered providers with aggregated data from all platform providers
+ * List all registered providers
  */
 app.get('/providers', verifyAuth, async (req, res) => {
+  const conn = await pool.getConnection();
   try {
-    const { externalSource } = req.query; // Query specific provider if needed
+    const [providers] = await conn.query(
+      `SELECT provider_id, company_name, email, contact_number, API_endpoint, created_at, updated_at 
+       FROM providers ORDER BY created_at DESC`
+    );
 
-    if (externalSource) {
-      // Get providers from external source
-      try {
-        const adapter = ProviderAdapterFactory.createAdapter(externalSource);
-        const externalProviders = await adapter.getProviders();
-        
-        return res.json({
-          source: externalSource,
-          total: externalProviders.length,
-          providers: externalProviders
-        });
-      } catch (err) {
-        return res.status(400).json({ error: `Failed to fetch from ${externalSource}`, message: err.message });
-      }
-    }
-
-    // Return SaaS-managed providers
-    const providers = Array.from(providerRegistry.values());
-    
     res.json({
       total: providers.length,
-      source: 'saas-managed',
       providers
     });
   } catch (err) {
-    console.error('Error fetching providers:', err);
+    console.error('Error fetching providers:', err.message);
     res.status(500).json({ error: 'Failed to fetch providers', message: err.message });
+  } finally {
+    conn.release();
   }
 });
 
 /**
  * GET /providers/:providerId
- * Get provider details and sync status
+ * Get provider details by ID
  */
 app.get('/providers/:providerId', verifyAuth, async (req, res) => {
+  const conn = await pool.getConnection();
   try {
     const { providerId } = req.params;
-    const provider = providerRegistry.get(providerId);
 
-    if (!provider) {
+    const [providers] = await conn.query(
+      `SELECT provider_id, company_name, email, contact_number, API_endpoint, created_at, updated_at 
+       FROM providers WHERE provider_id = ?`,
+      [providerId]
+    );
+
+    if (providers.length === 0) {
       return res.status(404).json({ error: 'Provider not found' });
     }
 
-    // Check status on external providers
-    const externalStatuses = {};
-
-    for (const [providerName, externalId] of Object.entries(provider.externalIds)) {
-      try {
-        const adapter = ProviderAdapterFactory.createAdapter(providerName);
-        const status = await adapter.checkStatus();
-        externalStatuses[providerName] = status;
-      } catch (err) {
-        externalStatuses[providerName] = { status: 'error', error: err.message };
-      }
-    }
-
-    res.json({
-      provider,
-      externalStatuses
-    });
+    res.json(providers[0]);
   } catch (err) {
-    console.error('Error fetching provider:', err);
+    console.error('Error fetching provider:', err.message);
     res.status(500).json({ error: 'Failed to fetch provider', message: err.message });
+  } finally {
+    conn.release();
   }
 });
 
@@ -176,118 +148,114 @@ app.get('/providers/:providerId', verifyAuth, async (req, res) => {
  * Update provider information
  */
 app.put('/providers/:providerId', verifyAuth, async (req, res) => {
+  const conn = await pool.getConnection();
   try {
     const { providerId } = req.params;
-    const provider = providerRegistry.get(providerId);
+    const { company_name, email, contact_number, API_endpoint } = req.body;
 
-    if (!provider) {
+    const updateFields = [];
+    const updateValues = [];
+
+    if (company_name) {
+      updateFields.push('company_name = ?');
+      updateValues.push(company_name);
+    }
+    if (email) {
+      updateFields.push('email = ?');
+      updateValues.push(email);
+    }
+    if (contact_number) {
+      updateFields.push('contact_number = ?');
+      updateValues.push(contact_number);
+    }
+    if (API_endpoint) {
+      updateFields.push('API_endpoint = ?');
+      updateValues.push(API_endpoint);
+    }
+
+    if (updateFields.length === 0) {
+      return res.status(400).json({ error: 'No fields to update' });
+    }
+
+    updateValues.push(providerId);
+
+    const query = `UPDATE providers SET ${updateFields.join(', ')} WHERE provider_id = ?`;
+    const result = await conn.query(query, updateValues);
+
+    if (result[0].affectedRows === 0) {
       return res.status(404).json({ error: 'Provider not found' });
     }
 
-    // Update SaaS record
-    const { name, contactEmail, phone, website, location } = req.body;
-    if (name) provider.name = name;
-    if (contactEmail) provider.contactEmail = contactEmail;
-    if (phone) provider.phone = phone;
-    if (website) provider.website = website;
-    if (location) provider.location = location;
-    provider.updatedAt = new Date();
-
-    // Update on external providers
-    const updateResults = {};
-
-    for (const [providerName, externalId] of Object.entries(provider.externalIds)) {
-      try {
-        const adapter = ProviderAdapterFactory.createAdapter(providerName);
-        const updated = await adapter.updateProvider(externalId, req.body);
-        updateResults[providerName] = { status: 'updated', data: updated };
-      } catch (err) {
-        updateResults[providerName] = { status: 'failed', error: err.message };
-      }
-    }
-
-    res.json({
-      message: 'Provider updated successfully',
-      provider,
-      updateDetails: updateResults
-    });
+    res.json({ message: 'Provider updated successfully' });
   } catch (err) {
-    console.error('Provider update error:', err);
+    console.error('Provider update error:', err.message);
+    if (err.code === 'ER_DUP_ENTRY') {
+      return res.status(409).json({ error: 'Email or API endpoint already in use' });
+    }
     res.status(500).json({ error: 'Provider update failed', message: err.message });
+  } finally {
+    conn.release();
   }
 });
 
 /**
- * POST /providers/:providerId/sync
- * Manually sync provider data from external source
+ * DELETE /providers/:providerId
+ * Delete a provider
  */
-app.post('/providers/:providerId/sync', verifyAuth, async (req, res) => {
+app.delete('/providers/:providerId', verifyAuth, async (req, res) => {
+  const conn = await pool.getConnection();
   try {
     const { providerId } = req.params;
-    const { sources } = req.body; // ['redPlug', 'greenPlug', 'bluePlug']
 
-    const provider = providerRegistry.get(providerId);
-    if (!provider) {
+    const result = await conn.query(
+      `DELETE FROM providers WHERE provider_id = ?`,
+      [providerId]
+    );
+
+    if (result[0].affectedRows === 0) {
       return res.status(404).json({ error: 'Provider not found' });
     }
 
-    const syncResults = {};
-
-    for (const providerName of (sources || Object.keys(provider.externalIds))) {
-      try {
-        const adapter = ProviderAdapterFactory.createAdapter(providerName);
-        const externalProvider = await adapter.getProvider(provider.externalIds[providerName] || providerId);
-        
-        // Update local record with external data
-        Object.assign(provider, externalProvider);
-        provider.updatedAt = new Date();
-
-        syncResults[providerName] = { status: 'synced', data: externalProvider };
-      } catch (err) {
-        syncResults[providerName] = { status: 'failed', error: err.message };
-      }
-    }
-
-    res.json({
-      message: 'Provider sync completed',
-      provider,
-      syncDetails: syncResults
-    });
+    res.json({ message: 'Provider deleted successfully' });
   } catch (err) {
-    console.error('Provider sync error:', err);
-    res.status(500).json({ error: 'Provider sync failed', message: err.message });
+    console.error('Provider delete error:', err.message);
+    res.status(500).json({ error: 'Provider deletion failed', message: err.message });
+  } finally {
+    conn.release();
   }
 });
 
 /**
- * GET /providers/status/all
- * Check status of all external providers
+ * POST /providers/:providerId/validate
+ * Validate provider credentials
  */
-app.get('/providers/status/all', async (req, res) => {
+app.post('/providers/:providerId/validate', async (req, res) => {
+  const conn = await pool.getConnection();
   try {
-    const statusList = {};
+    const { providerId } = req.params;
+    const { password } = req.body;
 
-    for (const providerName of ['redPlug', 'greenPlug', 'bluePlug']) {
-      try {
-        const adapter = ProviderAdapterFactory.createAdapter(providerName);
-        const status = await adapter.checkStatus();
-        statusList[providerName] = status;
-      } catch (err) {
-        statusList[providerName] = {
-          provider: providerName,
-          status: 'error',
-          error: err.message
-        };
-      }
+    if (!password) {
+      return res.status(400).json({ error: 'Password required' });
     }
 
-    res.json({
-      timestamp: new Date(),
-      statuses: statusList
-    });
+    const [providers] = await conn.query(
+      `SELECT password_hash FROM providers WHERE provider_id = ?`,
+      [providerId]
+    );
+
+    if (providers.length === 0) {
+      return res.status(404).json({ error: 'Provider not found' });
+    }
+
+    const isValid = await bcrypt.compare(password, providers[0].password_hash);
+
+    res.json({ valid: isValid });
   } catch (err) {
-    console.error('Error checking provider statuses:', err);
-    res.status(500).json({ error: 'Failed to check statuses', message: err.message });
+    console.error('Validation error:', err.message);
+    res.status(500).json({ error: 'Validation failed', message: err.message });
+  } finally {
+    conn.release();
   }
 });
 
@@ -295,14 +263,51 @@ app.get('/providers/status/all', async (req, res) => {
  * GET /providers/health
  * Service health check
  */
-app.get('/providers/health', (req, res) => {
-  res.json({
-    status: 'healthy',
-    service: 'Provider Management Service',
-    port: PORT,
-    timestamp: new Date(),
-    registeredProviders: providerRegistry.size
-  });
+app.get('/providers/health', async (req, res) => {
+  const conn = await pool.getConnection();
+  try {
+    await conn.query('SELECT 1');
+
+    res.json({
+      status: 'healthy',
+      service: 'Provider Management Service',
+      port: PORT,
+      database: process.env.DB_NAME || 'provider_db',
+      timestamp: new Date()
+    });
+  } catch (err) {
+    res.status(503).json({
+      status: 'unhealthy',
+      error: 'Database connection failed',
+      message: err.message
+    });
+  } finally {
+    conn.release();
+  }
+});
+
+/**
+ * GET /health
+ * Alias for health check
+ */
+app.get('/health', async (req, res) => {
+  const conn = await pool.getConnection();
+  try {
+    await conn.query('SELECT 1');
+
+    res.json({
+      status: 'ok',
+      service: 'provider-management-service',
+      timestamp: new Date()
+    });
+  } catch (err) {
+    res.status(503).json({
+      status: 'error',
+      message: err.message
+    });
+  } finally {
+    conn.release();
+  }
 });
 
 /**
@@ -316,10 +321,27 @@ app.use((err, req, res, next) => {
   });
 });
 
-// Start server
-app.listen(PORT, () => {
-  console.log(`✅ Provider Management Service listening on port ${PORT}`);
-  console.log(`📍 Provider Adapters configured for: RedPlug, GreenPlug, BluePlug`);
-});
+// ============== SERVER STARTUP ==============
+
+async function start() {
+  try {
+    // Test database connection
+    const conn = await pool.getConnection();
+    await conn.query('SELECT 1');
+    conn.release();
+
+    app.listen(PORT, () => {
+      console.log(`✅ Provider Management Service listening on port ${PORT}`);
+      console.log(`📍 Database: ${process.env.DB_NAME || 'provider_db'}`);
+      console.log(`📍 DB Host: ${process.env.DB_HOST || 'mariadb'}`);
+    });
+  } catch (err) {
+    console.error('Failed to start service:', err.message);
+    process.exit(1);
+  }
+}
+
+start();
 
 module.exports = app;
+

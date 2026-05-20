@@ -160,6 +160,29 @@ services:
       - postgres-data:/var/lib/postgresql/data
       - ./databases/postgres-init.sh:/docker-entrypoint-initdb.d/init-postgres.sh:ro
 
+  # MariaDB for Provider Management Service
+  mariadb-provider:
+    image: mariadb:11
+    container_name: saasplug-mariadb-provider
+    environment:
+      MYSQL_ROOT_PASSWORD: root
+      MYSQL_DATABASE: provider_db
+      MYSQL_USER: provider_user
+      MYSQL_PASSWORD: provider_pass
+    ports:
+      - "3312:3306"
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - saasplug-network
+    volumes:
+      - mariadb-provider-data:/var/lib/mysql
+      - ./Provider_Management_Service/db/init.sql:/docker-entrypoint-initdb.d/01-init.sql
+    restart: unless-stopped
+
   # Central Service
   central-service:
     build:
@@ -229,6 +252,27 @@ services:
       rabbitmq:
         condition: service_healthy
       postgres:
+        condition: service_healthy
+    networks:
+      - saasplug-network
+    restart: unless-stopped
+
+  # Provider Management Service
+  provider-management-service:
+    build:
+      context: ./Provider_Management_Service
+    container_name: saasplug-provider-mgmt
+    ports:
+      - "3101:3101"
+    environment:
+      PORT: 3101
+      NODE_ENV: production
+      DB_HOST: mariadb-provider
+      DB_USER: provider_user
+      DB_PASSWORD: provider_pass
+      DB_NAME: provider_db
+    depends_on:
+      mariadb-provider:
         condition: service_healthy
     networks:
       - saasplug-network
@@ -305,3 +349,4 @@ volumes:
   mysql-green-data:
   mysql-blue-data:
   postgres-data:
+  mariadb-provider-data:
