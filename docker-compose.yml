@@ -19,6 +19,29 @@ services:
     volumes:
       - rabbitmq-data:/var/lib/rabbitmq
 
+  # HTTP Message Broker Service
+  message-broker:
+    build:
+      context: ./message_broker
+    container_name: saasplug-message-broker
+    ports:
+      - "3003:3003"
+    environment:
+      PORT: 3003
+      NODE_ENV: production
+      RABBITMQ_URL: amqp://guest:guest@rabbitmq:5672
+    healthcheck:
+      test: ["CMD", "node", "-e", "require('http').get('http://localhost:3003/health', (r) => process.exit(r.statusCode === 200 ? 0 : 1)).on('error', () => process.exit(1))"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+    networks:
+      - saasplug-network
+    restart: unless-stopped
+
   # MySQL Central Database
   mysql-central:
     image: mysql:8.0
@@ -243,18 +266,90 @@ services:
     environment:
       PORT: 3108
       NODE_ENV: production
-      DB_HOST: postgres
-      DB_USER: postgres
-      DB_PASSWORD: password
+      DB_HOST: mariadb-billing
+      DB_PORT: 3306
+      DB_USER: billing_user
+      DB_PASSWORD: billing_pass
       DB_NAME: billing_db
-      RABBITMQ_URL: amqp://guest:guest@rabbitmq:5672
+      MESSAGE_BROKER_URL: http://message-broker:3003
     depends_on:
-      rabbitmq:
+      message-broker:
         condition: service_healthy
-      postgres:
+      mariadb-billing:
         condition: service_healthy
     networks:
       - saasplug-network
+    restart: unless-stopped
+
+  # MariaDB for Billing Service
+  mariadb-billing:
+    image: mariadb:11
+    container_name: saasplug-mariadb-billing
+    environment:
+      MYSQL_ROOT_PASSWORD: root
+      MYSQL_DATABASE: billing_db
+      MYSQL_USER: billing_user
+      MYSQL_PASSWORD: billing_pass
+    ports:
+      - "3315:3306"
+    healthcheck:
+      test: ["CMD", "mariadb-admin", "ping", "-h", "localhost", "-uroot", "-proot"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - saasplug-network
+    volumes:
+      - mariadb-billing-data:/var/lib/mysql
+      - ./Billing_Service/db/init.sql:/docker-entrypoint-initdb.d/01-init.sql
+    restart: unless-stopped
+
+  # Payment Service
+  payment-service:
+    build:
+      context: ./Payment_Service
+    container_name: saasplug-payment
+    ports:
+      - "3107:3107"
+    environment:
+      PORT: 3107
+      NODE_ENV: production
+      DB_HOST: mariadb-payment
+      DB_PORT: 3306
+      DB_USER: payment_user
+      DB_PASSWORD: payment_pass
+      DB_NAME: payment_db
+      MESSAGE_BROKER_URL: http://message-broker:3003
+    depends_on:
+      message-broker:
+        condition: service_healthy
+      mariadb-payment:
+        condition: service_healthy
+    networks:
+      - saasplug-network
+    restart: unless-stopped
+
+  # MariaDB for Payment Service
+  mariadb-payment:
+    image: mariadb:11
+    container_name: saasplug-mariadb-payment
+    environment:
+      MYSQL_ROOT_PASSWORD: root
+      MYSQL_DATABASE: payment_db
+      MYSQL_USER: payment_user
+      MYSQL_PASSWORD: payment_pass
+    ports:
+      - "3316:3306"
+    healthcheck:
+      test: ["CMD", "mariadb-admin", "ping", "-h", "localhost", "-uroot", "-proot"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - saasplug-network
+    volumes:
+      - mariadb-payment-data:/var/lib/mysql
+      - ./Payment_Service/db/init.sql:/docker-entrypoint-initdb.d/01-init.sql
     restart: unless-stopped
 
   # Provider Management Service
@@ -273,6 +368,101 @@ services:
       DB_NAME: provider_db
     depends_on:
       mariadb-provider:
+        condition: service_healthy
+    networks:
+      - saasplug-network
+    restart: unless-stopped
+
+  # MariaDB for Auth Service
+  mariadb-auth:
+    image: mariadb:11
+    container_name: saasplug-mariadb-auth
+    environment:
+      MYSQL_ROOT_PASSWORD: root
+      MYSQL_DATABASE: auth_db
+      MYSQL_USER: auth_user
+      MYSQL_PASSWORD: auth_pass
+    ports:
+      - "3314:3306"
+    healthcheck:
+      test: ["CMD", "mariadb-admin", "ping", "-h", "localhost", "-uroot", "-proot"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - saasplug-network
+    volumes:
+      - mariadb-auth-data:/var/lib/mysql
+      - ./Auth_Service/db/init.sql:/docker-entrypoint-initdb.d/01-init.sql
+    restart: unless-stopped
+
+  # Auth Service
+  auth-service:
+    build:
+      context: ./Auth_Service
+    container_name: saasplug-auth
+    ports:
+      - "3100:3100"
+    environment:
+      PORT: 3100
+      NODE_ENV: production
+      DB_HOST: mariadb-auth
+      DB_PORT: 3306
+      DB_USER: auth_user
+      DB_PASSWORD: auth_pass
+      DB_NAME: auth_db
+      JWT_SECRET: your_jwt_secret_key_change_in_production
+      JWT_EXPIRY: 24h
+    depends_on:
+      mariadb-auth:
+        condition: service_healthy
+    networks:
+      - saasplug-network
+    restart: unless-stopped
+
+  # MariaDB for Analytics Service
+  mariadb-analytics:
+    image: mariadb:11
+    container_name: saasplug-mariadb-analytics
+    environment:
+      MYSQL_ROOT_PASSWORD: root
+      MYSQL_DATABASE: analytics_db
+      MYSQL_USER: analytics_user
+      MYSQL_PASSWORD: analytics_pass
+    ports:
+      - "3313:3306"
+    healthcheck:
+      test: ["CMD", "mariadb-admin", "ping", "-h", "localhost", "-uroot", "-proot"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - saasplug-network
+    volumes:
+      - mariadb-analytics-data:/var/lib/mysql
+      - ./Analytics_Service/db/init.sql:/docker-entrypoint-initdb.d/01-init.sql
+    restart: unless-stopped
+
+  # Analytics Service
+  analytics-service:
+    build:
+      context: ./Analytics_Service
+    container_name: saasplug-analytics
+    ports:
+      - "3106:3106"
+    environment:
+      PORT: 3106
+      NODE_ENV: production
+      DB_HOST: mariadb-analytics
+      DB_PORT: 3306
+      DB_USER: analytics_user
+      DB_PASSWORD: analytics_pass
+      DB_NAME: analytics_db
+      MESSAGE_BROKER_URL: http://message-broker:3003
+    depends_on:
+      message-broker:
+        condition: service_healthy
+      mariadb-analytics:
         condition: service_healthy
     networks:
       - saasplug-network
@@ -350,3 +540,7 @@ volumes:
   mysql-blue-data:
   postgres-data:
   mariadb-provider-data:
+  mariadb-analytics-data:
+  mariadb-auth-data:
+  mariadb-billing-data:
+  mariadb-payment-data:

@@ -1,67 +1,86 @@
 /**
  * Auth Service
- * Handles user authentication, JWT token generation, and Google OAuth integration
+ * Simplified MariaDB-backed auth using User diagram schema
  * Port: 3100
  */
 
 const express = require('express');
 const jwt = require('jsonwebtoken');
-const bcrypt = require('bcryptjs');
 const axios = require('axios');
-const { v4: uuidv4 } = require('uuid');
+const mysql = require('mysql2/promise');
 
 const app = express();
 app.use(express.json());
 
-const PORT = process.env.PORT || 3100;
+const PORT = Number(process.env.PORT || 3100);
 const JWT_SECRET = process.env.JWT_SECRET || 'your_jwt_secret_key_change_in_production';
 const JWT_EXPIRY = process.env.JWT_EXPIRY || '24h';
+const DB_HOST = process.env.DB_HOST || 'localhost';
+const DB_PORT = Number(process.env.DB_PORT || 3306);
+const DB_USER = process.env.DB_USER || 'auth_user';
+const DB_PASSWORD = process.env.DB_PASSWORD || 'auth_pass';
+const DB_NAME = process.env.DB_NAME || 'auth_db';
 
-// In-memory user storage (replace with DB in production)
-const users = new Map();
-const refreshTokens = new Set();
-
-// Initialize admin user for testing
-const adminId = uuidv4();
-const adminPasswordHash = bcrypt.hashSync('admin123', 10);
-users.set('admin@saasplug.com', {
-  id: adminId,
-  email: 'admin@saasplug.com',
-  password: adminPasswordHash,
-  role: 'admin',
-  provider: 'local',
-  createdAt: new Date(),
-  verified: true
+const pool = mysql.createPool({
+  host: DB_HOST,
+  port: DB_PORT,
+  user: DB_USER,
+  password: DB_PASSWORD,
+  database: DB_NAME,
+  waitForConnections: true,
+  connectionLimit: 10,
+  queueLimit: 0
 });
 
-/**
- * Token generation with claims
- */
-function generateTokens(user) {
-  const accessToken = jwt.sign(
+async function initializeDatabase() {
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS User (
+      user_id INT(10) UNSIGNED PRIMARY KEY AUTO_INCREMENT,
+      username VARCHAR(255) NOT NULL,
+      email VARCHAR(255) NOT NULL,
+      google_id INT(10) UNSIGNED NULL,
+      UNIQUE KEY uq_user_username (username),
+      UNIQUE KEY uq_user_google_id (google_id),
+      INDEX idx_user_email (email)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+  `);
+}
+
+function normalizeUser(row) {
+  return {
+    user_id: row.user_id,
+    username: row.username,
+    email: row.email,
+    google_id: row.google_id
+  };
+}
+
+function toGoogleIdInt(googleSub) {
+  if (!googleSub) {
+    return null;
+  }
+
+  const parsed = Number.parseInt(googleSub, 10);
+  if (Number.isNaN(parsed) || parsed < 0) {
+    return null;
+  }
+
+  return parsed;
+}
+
+function generateAccessToken(user) {
+  return jwt.sign(
     {
-      id: user.id,
+      id: user.user_id,
+      username: user.username,
       email: user.email,
-      role: user.role,
-      provider: user.provider
+      google_id: user.google_id
     },
     JWT_SECRET,
     { expiresIn: JWT_EXPIRY }
   );
-
-  const refreshToken = jwt.sign(
-    { id: user.id, type: 'refresh' },
-    JWT_SECRET,
-    { expiresIn: '7d' }
-  );
-
-  refreshTokens.add(refreshToken);
-  return { accessToken, refreshToken };
 }
 
-/**
- * Verify JWT token middleware
- */
 function verifyToken(req, res, next) {
   const token = req.headers.authorization?.split(' ')[1];
   if (!token) {
@@ -69,320 +88,226 @@ function verifyToken(req, res, next) {
   }
 
   try {
-    const decoded = jwt.verify(token, JWT_SECRET);
-    req.user = decoded;
-    next();
+    req.user = jwt.verify(token, JWT_SECRET);
+    return next();
   } catch (err) {
     return res.status(401).json({ error: 'Invalid token', message: err.message });
   }
 }
 
-/**
- * POST /auth/register
- * Register new user with email and password
- */
+async function getUserByEmail(email) {
+  const [rows] = await pool.query(
+    `SELECT user_id, username, email, google_id
+     FROM User
+     WHERE email = ?
+     ORDER BY user_id ASC
+     LIMIT 1`,
+    [email]
+  );
+
+  return rows[0] || null;
+}
+
+async function getUserById(userId) {
+  const [rows] = await pool.query(
+    `SELECT user_id, username, email, google_id
+     FROM User
+     WHERE user_id = ?`,
+    [userId]
+  );
+
+  return rows[0] || null;
+}
+
 app.post('/auth/register', async (req, res) => {
   try {
-    const { email, password, name, userType } = req.body;
+    const { username, email, google_id } = req.body;
 
-    if (!email || !password) {
-      return res.status(400).json({ error: 'Email and password required' });
+    if (!username || !email) {
+      return res.status(400).json({ error: 'username and email are required' });
     }
 
-    if (users.has(email)) {
-      return res.status(409).json({ error: 'User already exists' });
-    }
+    const [insertResult] = await pool.query(
+      `INSERT INTO User (username, email, google_id)
+       VALUES (?, ?, ?)`,
+      [username, email, google_id ?? null]
+    );
 
-    const userId = uuidv4();
-    const hashedPassword = bcrypt.hashSync(password, 10);
+    const user = await getUserById(insertResult.insertId);
+    const token = generateAccessToken(user);
 
-    const newUser = {
-      id: userId,
-      email,
-      password: hashedPassword,
-      name: name || '',
-      role: userType || 'user',
-      provider: 'local',
-      createdAt: new Date(),
-      verified: false
-    };
-
-    users.set(email, newUser);
-
-    const tokens = generateTokens(newUser);
-
-    res.status(201).json({
+    return res.status(201).json({
       message: 'User registered successfully',
-      user: {
-        id: newUser.id,
-        email: newUser.email,
-        name: newUser.name,
-        role: newUser.role
-      },
-      tokens
+      user: normalizeUser(user),
+      accessToken: token
     });
   } catch (err) {
-    console.error('Registration error:', err);
-    res.status(500).json({ error: 'Registration failed', message: err.message });
+    return res.status(500).json({
+      error: 'Registration failed',
+      message: err.message
+    });
   }
 });
 
-/**
- * POST /auth/login
- * Local authentication with email/password
- */
 app.post('/auth/login', async (req, res) => {
   try {
-    const { email, password } = req.body;
+    const { email } = req.body;
 
-    if (!email || !password) {
-      return res.status(400).json({ error: 'Email and password required' });
+    if (!email) {
+      return res.status(400).json({ error: 'email is required' });
     }
 
-    const user = users.get(email);
-    if (!user) {
-      return res.status(401).json({ error: 'Invalid credentials' });
-    }
-
-    const passwordMatch = bcrypt.compareSync(password, user.password);
-    if (!passwordMatch) {
-      return res.status(401).json({ error: 'Invalid credentials' });
-    }
-
-    const tokens = generateTokens(user);
-
-    res.json({
-      message: 'Login successful',
-      user: {
-        id: user.id,
-        email: user.email,
-        name: user.name,
-        role: user.role
-      },
-      tokens
-    });
-  } catch (err) {
-    console.error('Login error:', err);
-    res.status(500).json({ error: 'Login failed', message: err.message });
-  }
-});
-
-/**
- * POST /auth/google
- * Google OAuth authentication
- */
-app.post('/auth/google', async (req, res) => {
-  try {
-    const { idToken } = req.body;
-
-    if (!idToken) {
-      return res.status(400).json({ error: 'Google ID token required' });
-    }
-
-    // Verify Google token with Google API
-    const googleApiUrl = `https://oauth2.googleapis.com/tokeninfo?id_token=${idToken}`;
-    
-    try {
-      const googleResponse = await axios.get(googleApiUrl, { timeout: 5000 });
-      const { email, name, picture } = googleResponse.data;
-
-      let user = users.get(email);
-
-      if (!user) {
-        // Create new user from Google OAuth
-        const userId = uuidv4();
-        user = {
-          id: userId,
-          email,
-          name: name || '',
-          picture: picture || '',
-          role: 'user',
-          provider: 'google',
-          createdAt: new Date(),
-          verified: true
-        };
-        users.set(email, user);
-      }
-
-      const tokens = generateTokens(user);
-
-      res.json({
-        message: 'Google authentication successful',
-        user: {
-          id: user.id,
-          email: user.email,
-          name: user.name,
-          role: user.role,
-          picture: user.picture
-        },
-        tokens
-      });
-    } catch (googleError) {
-      console.error('Google token verification failed:', googleError.message);
-      return res.status(401).json({ error: 'Google token verification failed' });
-    }
-  } catch (err) {
-    console.error('Google auth error:', err);
-    res.status(500).json({ error: 'Google authentication failed', message: err.message });
-  }
-});
-
-/**
- * POST /auth/refresh
- * Refresh access token using refresh token
- */
-app.post('/auth/refresh', (req, res) => {
-  try {
-    const { refreshToken } = req.body;
-
-    if (!refreshToken || !refreshTokens.has(refreshToken)) {
-      return res.status(401).json({ error: 'Invalid refresh token' });
-    }
-
-    const decoded = jwt.verify(refreshToken, JWT_SECRET);
-    const user = Array.from(users.values()).find(u => u.id === decoded.id);
-
+    const user = await getUserByEmail(email);
     if (!user) {
       return res.status(401).json({ error: 'User not found' });
     }
 
-    const tokens = generateTokens(user);
-    refreshTokens.delete(refreshToken); // Invalidate old refresh token
+    const token = generateAccessToken(user);
 
-    res.json({
-      message: 'Token refreshed successfully',
-      tokens
+    return res.json({
+      message: 'Login successful',
+      user: normalizeUser(user),
+      accessToken: token
     });
   } catch (err) {
-    console.error('Token refresh error:', err);
-    res.status(401).json({ error: 'Token refresh failed', message: err.message });
+    return res.status(500).json({
+      error: 'Login failed',
+      message: err.message
+    });
   }
 });
 
-/**
- * POST /auth/logout
- * Logout user (invalidate refresh token)
- */
-app.post('/auth/logout', verifyToken, (req, res) => {
+app.post('/auth/google', async (req, res) => {
   try {
-    const { refreshToken } = req.body;
-    if (refreshToken) {
-      refreshTokens.delete(refreshToken);
+    const { idToken } = req.body;
+    if (!idToken) {
+      return res.status(400).json({ error: 'Google ID token required' });
     }
-    res.json({ message: 'Logout successful' });
+
+    let googleData;
+    try {
+      const googleResponse = await axios.get(`https://oauth2.googleapis.com/tokeninfo?id_token=${idToken}`, { timeout: 5000 });
+      googleData = googleResponse.data;
+    } catch (verifyErr) {
+      return res.status(401).json({ error: 'Google token verification failed' });
+    }
+
+    const email = googleData.email;
+    const username = googleData.name || `google-user-${Date.now()}`;
+    const googleId = toGoogleIdInt(googleData.sub);
+
+    let user = await getUserByEmail(email);
+
+    if (!user) {
+      const [insertResult] = await pool.query(
+        `INSERT INTO User (username, email, google_id)
+         VALUES (?, ?, ?)`,
+        [username, email, googleId]
+      );
+      user = await getUserById(insertResult.insertId);
+    } else {
+      await pool.query(
+        `UPDATE User
+         SET username = ?, google_id = COALESCE(?, google_id)
+         WHERE user_id = ?`,
+        [username, googleId, user.user_id]
+      );
+      user = await getUserById(user.user_id);
+    }
+
+    const token = generateAccessToken(user);
+
+    return res.json({
+      message: 'Google authentication successful',
+      user: normalizeUser(user),
+      accessToken: token
+    });
   } catch (err) {
-    console.error('Logout error:', err);
-    res.status(500).json({ error: 'Logout failed', message: err.message });
+    return res.status(500).json({
+      error: 'Google authentication failed',
+      message: err.message
+    });
   }
 });
 
-/**
- * GET /auth/profile
- * Get authenticated user profile
- */
-app.get('/auth/profile', verifyToken, (req, res) => {
+app.get('/auth/profile', verifyToken, async (req, res) => {
   try {
-    const user = users.get(req.user.email);
+    const user = await getUserById(req.user.id);
     if (!user) {
       return res.status(404).json({ error: 'User not found' });
     }
 
-    const { password, ...userWithoutPassword } = user;
-    res.json(userWithoutPassword);
+    return res.json(normalizeUser(user));
   } catch (err) {
-    console.error('Profile fetch error:', err);
-    res.status(500).json({ error: 'Failed to fetch profile', message: err.message });
+    return res.status(500).json({
+      error: 'Failed to fetch profile',
+      message: err.message
+    });
   }
 });
 
-/**
- * PUT /auth/profile
- * Update user profile
- */
-app.put('/auth/profile', verifyToken, (req, res) => {
+app.put('/auth/profile', verifyToken, async (req, res) => {
   try {
-    const { name, picture } = req.body;
-    const user = users.get(req.user.email);
+    const { username, email } = req.body;
 
-    if (!user) {
-      return res.status(404).json({ error: 'User not found' });
-    }
+    await pool.query(
+      `UPDATE User
+       SET username = COALESCE(?, username),
+           email = COALESCE(?, email)
+       WHERE user_id = ?`,
+      [username ?? null, email ?? null, req.user.id]
+    );
 
-    if (name) user.name = name;
-    if (picture) user.picture = picture;
-    user.updatedAt = new Date();
-
-    const { password, ...userWithoutPassword } = user;
-    res.json({
+    const user = await getUserById(req.user.id);
+    return res.json({
       message: 'Profile updated successfully',
-      user: userWithoutPassword
+      user: normalizeUser(user)
     });
   } catch (err) {
-    console.error('Profile update error:', err);
-    res.status(500).json({ error: 'Failed to update profile', message: err.message });
+    return res.status(500).json({
+      error: 'Failed to update profile',
+      message: err.message
+    });
   }
 });
 
-/**
- * POST /auth/change-password
- * Change user password
- */
-app.post('/auth/change-password', verifyToken, (req, res) => {
+app.get('/auth/health', async (req, res) => {
   try {
-    const { currentPassword, newPassword } = req.body;
-    const user = users.get(req.user.email);
-
-    if (!user) {
-      return res.status(404).json({ error: 'User not found' });
-    }
-
-    if (!currentPassword || !newPassword) {
-      return res.status(400).json({ error: 'Current and new password required' });
-    }
-
-    const passwordMatch = bcrypt.compareSync(currentPassword, user.password);
-    if (!passwordMatch) {
-      return res.status(401).json({ error: 'Current password is incorrect' });
-    }
-
-    user.password = bcrypt.hashSync(newPassword, 10);
-    user.updatedAt = new Date();
-
-    res.json({ message: 'Password changed successfully' });
+    const [rows] = await pool.query('SELECT COUNT(*) AS total_users FROM User');
+    return res.json({
+      status: 'healthy',
+      service: 'Auth Service',
+      port: PORT,
+      totalUsers: Number(rows[0].total_users || 0),
+      timestamp: new Date().toISOString()
+    });
   } catch (err) {
-    console.error('Change password error:', err);
-    res.status(500).json({ error: 'Failed to change password', message: err.message });
+    return res.status(503).json({
+      status: 'error',
+      service: 'Auth Service',
+      message: err.message
+    });
   }
 });
 
-/**
- * GET /auth/Health
- * Service health check
- */
-app.get('/auth/health', (req, res) => {
-  res.json({
-    status: 'healthy',
-    service: 'Auth Service',
-    port: PORT,
-    timestamp: new Date()
-  });
-});
-
-/**
- * Error handling middleware
- */
 app.use((err, req, res, next) => {
-  console.error('Unhandled error:', err);
-  res.status(err.status || 500).json({
+  return res.status(err.status || 500).json({
     error: err.message || 'Internal server error',
     status: err.status || 500
   });
 });
 
-// Start server
-app.listen(PORT, () => {
-  console.log(`✅ Auth Service listening on port ${PORT}`);
-  console.log(`📝 Test login: admin@saasplug.com / admin123`);
-});
+initializeDatabase()
+  .then(() => {
+    app.listen(PORT, () => {
+      console.log(`Auth Service listening on port ${PORT}`);
+      console.log(`MariaDB connected: ${DB_HOST}:${DB_PORT}/${DB_NAME}`);
+      console.log('Auth mode: simplified User diagram');
+    });
+  })
+  .catch((err) => {
+    console.error('Failed to start Auth Service:', err.message);
+    process.exit(1);
+  });
 
 module.exports = app;
