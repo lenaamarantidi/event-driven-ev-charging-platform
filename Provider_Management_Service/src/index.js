@@ -1,347 +1,354 @@
 /**
  * Provider Management Service
- * Manages provider registration, updates, and federation
- * Uses MariaDB for persistence
+ * MariaDB-backed provider registry
  * Port: 3101
  */
 
 const express = require('express');
 const mysql = require('mysql2/promise');
-const bcrypt = require('bcryptjs');
-const axios = require('axios');
-require('dotenv').config();
+const { ProviderAdapterFactory } = require('./adapters/providerAdapter');
 
 const app = express();
 app.use(express.json());
 
-const PORT = process.env.PORT || 3101;
-
-// ============== DATABASE CONFIGURATION ==============
+const PORT = Number(process.env.PORT || 3101);
+const DB_HOST = process.env.DB_HOST || 'localhost';
+const DB_PORT = Number(process.env.DB_PORT || 3306);
+const DB_USER = process.env.DB_USER || 'provider_user';
+const DB_PASSWORD = process.env.DB_PASSWORD || 'provider_pass';
+const DB_NAME = process.env.DB_NAME || 'provider_db';
 
 const pool = mysql.createPool({
-  host: process.env.DB_HOST || 'mariadb',
-  user: process.env.DB_USER || 'root',
-  password: process.env.DB_PASSWORD || 'root',
-  database: process.env.DB_NAME || 'provider_db',
+  host: DB_HOST,
+  port: DB_PORT,
+  user: DB_USER,
+  password: DB_PASSWORD,
+  database: DB_NAME,
   waitForConnections: true,
   connectionLimit: 10,
   queueLimit: 0
 });
 
-pool.on('error', (err) => {
-  console.error('Pool error:', err.message);
-});
-
-/**
- * Middleware: Verify auth token (simplified for demo)
- */
 function verifyAuth(req, res, next) {
   const token = req.headers.authorization?.split(' ')[1];
   if (!token) {
     return res.status(401).json({ error: 'Unauthorized' });
   }
-  next();
+  return next();
 }
 
-/**
- * POST /providers/register
- * Register a new provider
- */
+async function initializeDatabase() {
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS Provider (
+      provider_id INT PRIMARY KEY AUTO_INCREMENT,
+      company_name VARCHAR(255) NOT NULL,
+      password_hash VARCHAR(255) NOT NULL,
+      TIN DECIMAL(9,0) NOT NULL,
+      email VARCHAR(255) NOT NULL,
+      contact_number DECIMAL(10,0) NULL,
+      API_endpoint VARCHAR(255) NOT NULL,
+      API_key VARCHAR(255) NOT NULL,
+      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+      UNIQUE KEY uq_provider_company_name (company_name),
+      UNIQUE KEY uq_provider_tin (TIN),
+      UNIQUE KEY uq_provider_email (email)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+  `);
+}
+
+function mapRequestToProviderPayload(body) {
+  return {
+    company_name: body.company_name ?? body.name,
+    password_hash: body.password_hash,
+    TIN: body.TIN,
+    email: body.email ?? body.contactEmail,
+    contact_number: body.contact_number ?? body.phone ?? null,
+    API_endpoint: body.API_endpoint,
+    API_key: body.API_key
+  };
+}
+
+function validateCreatePayload(payload) {
+  const required = ['company_name', 'password_hash', 'TIN', 'email', 'API_endpoint', 'API_key'];
+  return required.filter((field) => payload[field] === undefined || payload[field] === null || payload[field] === '');
+}
+
+function normalizeProvider(row) {
+  return {
+    provider_id: row.provider_id,
+    company_name: row.company_name,
+    password_hash: row.password_hash,
+    TIN: row.TIN,
+    email: row.email,
+    contact_number: row.contact_number,
+    API_endpoint: row.API_endpoint,
+    API_key: row.API_key,
+    created_at: row.created_at,
+    updated_at: row.updated_at
+  };
+}
+
+async function getProviderById(providerId) {
+  const [rows] = await pool.query(
+    `SELECT provider_id, company_name, password_hash, TIN, email, contact_number, API_endpoint, API_key, created_at, updated_at
+     FROM Provider
+     WHERE provider_id = ?`,
+    [providerId]
+  );
+
+  if (!rows.length) {
+    return null;
+  }
+
+  return normalizeProvider(rows[0]);
+}
+
 app.post('/providers/register', verifyAuth, async (req, res) => {
-  const conn = await pool.getConnection();
   try {
-    const {
-      company_name,
-      password,
-      TIN,
-      email,
-      contact_number,
-      API_endpoint,
-      API_key
-    } = req.body;
+    const payload = mapRequestToProviderPayload(req.body);
+    const missing = validateCreatePayload(payload);
 
-    if (!company_name || !password || !TIN || !email || !API_endpoint || !API_key) {
-      return res.status(400).json({ error: 'Missing required fields' });
+    if (missing.length) {
+      return res.status(400).json({
+        error: 'Missing required fields',
+        missing
+      });
     }
 
-    const passwordHash = await bcrypt.hash(password, 10);
-
-    await conn.query(
-      `INSERT INTO providers (company_name, password_hash, TIN, email, contact_number, API_endpoint, API_key)
+    const [result] = await pool.query(
+      `INSERT INTO Provider (company_name, password_hash, TIN, email, contact_number, API_endpoint, API_key)
        VALUES (?, ?, ?, ?, ?, ?, ?)`,
-      [company_name, passwordHash, TIN, email, contact_number || null, API_endpoint, API_key]
+      [
+        payload.company_name,
+        payload.password_hash,
+        payload.TIN,
+        payload.email,
+        payload.contact_number,
+        payload.API_endpoint,
+        payload.API_key
+      ]
     );
 
-    res.status(201).json({
+    const provider = await getProviderById(result.insertId);
+
+    return res.status(201).json({
       message: 'Provider registered successfully',
-      provider: {
-        company_name,
-        email,
-        API_endpoint
-      }
+      provider
     });
   } catch (err) {
-    console.error('Provider registration error:', err.message);
-    if (err.code === 'ER_DUP_ENTRY') {
-      return res.status(409).json({ error: 'Provider or field already exists' });
-    }
-    res.status(500).json({ error: 'Provider registration failed', message: err.message });
-  } finally {
-    conn.release();
+    return res.status(500).json({
+      error: 'Provider registration failed',
+      message: err.message
+    });
   }
 });
 
-/**
- * GET /providers
- * List all registered providers
- */
 app.get('/providers', verifyAuth, async (req, res) => {
-  const conn = await pool.getConnection();
   try {
-    const [providers] = await conn.query(
-      `SELECT provider_id, company_name, email, contact_number, API_endpoint, created_at, updated_at 
-       FROM providers ORDER BY created_at DESC`
+    const { externalSource } = req.query;
+
+    if (externalSource) {
+      try {
+        const adapter = ProviderAdapterFactory.createAdapter(externalSource);
+        const externalProviders = await adapter.getProviders();
+
+        return res.json({
+          source: externalSource,
+          total: externalProviders.length,
+          providers: externalProviders
+        });
+      } catch (err) {
+        return res.status(400).json({
+          error: `Failed to fetch from ${externalSource}`,
+          message: err.message
+        });
+      }
+    }
+
+    const [rows] = await pool.query(
+      `SELECT provider_id, company_name, password_hash, TIN, email, contact_number, API_endpoint, API_key, created_at, updated_at
+       FROM Provider
+       ORDER BY provider_id DESC`
     );
 
-    res.json({
-      total: providers.length,
-      providers
+    return res.json({
+      total: rows.length,
+      source: 'provider-db',
+      providers: rows.map(normalizeProvider)
     });
   } catch (err) {
-    console.error('Error fetching providers:', err.message);
-    res.status(500).json({ error: 'Failed to fetch providers', message: err.message });
-  } finally {
-    conn.release();
+    return res.status(500).json({
+      error: 'Failed to fetch providers',
+      message: err.message
+    });
   }
 });
 
-/**
- * GET /providers/:providerId
- * Get provider details by ID
- */
-app.get('/providers/:providerId', verifyAuth, async (req, res) => {
-  const conn = await pool.getConnection();
+app.get('/providers/:providerId(\\d+)', verifyAuth, async (req, res) => {
   try {
-    const { providerId } = req.params;
+    const provider = await getProviderById(req.params.providerId);
 
-    const [providers] = await conn.query(
-      `SELECT provider_id, company_name, email, contact_number, API_endpoint, created_at, updated_at 
-       FROM providers WHERE provider_id = ?`,
-      [providerId]
+    if (!provider) {
+      return res.status(404).json({ error: 'Provider not found' });
+    }
+
+    return res.json({ provider });
+  } catch (err) {
+    return res.status(500).json({
+      error: 'Failed to fetch provider',
+      message: err.message
+    });
+  }
+});
+
+app.put('/providers/:providerId(\\d+)', verifyAuth, async (req, res) => {
+  try {
+    const providerId = req.params.providerId;
+    const existing = await getProviderById(providerId);
+
+    if (!existing) {
+      return res.status(404).json({ error: 'Provider not found' });
+    }
+
+    const payload = mapRequestToProviderPayload(req.body);
+    const mutable = ['company_name', 'password_hash', 'TIN', 'email', 'contact_number', 'API_endpoint', 'API_key'];
+
+    const setClauses = [];
+    const values = [];
+
+    for (const column of mutable) {
+      if (payload[column] !== undefined) {
+        setClauses.push(`${column} = ?`);
+        values.push(payload[column]);
+      }
+    }
+
+    if (!setClauses.length) {
+      return res.status(400).json({ error: 'No fields provided to update' });
+    }
+
+    values.push(providerId);
+
+    await pool.query(
+      `UPDATE Provider
+       SET ${setClauses.join(', ')}, updated_at = CURRENT_TIMESTAMP
+       WHERE provider_id = ?`,
+      values
     );
 
-    if (providers.length === 0) {
-      return res.status(404).json({ error: 'Provider not found' });
-    }
+    const provider = await getProviderById(providerId);
 
-    res.json(providers[0]);
+    return res.json({
+      message: 'Provider updated successfully',
+      provider
+    });
   } catch (err) {
-    console.error('Error fetching provider:', err.message);
-    res.status(500).json({ error: 'Failed to fetch provider', message: err.message });
-  } finally {
-    conn.release();
+    return res.status(500).json({
+      error: 'Provider update failed',
+      message: err.message
+    });
   }
 });
 
-/**
- * PUT /providers/:providerId
- * Update provider information
- */
-app.put('/providers/:providerId', verifyAuth, async (req, res) => {
-  const conn = await pool.getConnection();
+app.post('/providers/:providerId(\\d+)/sync', verifyAuth, async (req, res) => {
   try {
-    const { providerId } = req.params;
-    const { company_name, email, contact_number, API_endpoint } = req.body;
-
-    const updateFields = [];
-    const updateValues = [];
-
-    if (company_name) {
-      updateFields.push('company_name = ?');
-      updateValues.push(company_name);
-    }
-    if (email) {
-      updateFields.push('email = ?');
-      updateValues.push(email);
-    }
-    if (contact_number) {
-      updateFields.push('contact_number = ?');
-      updateValues.push(contact_number);
-    }
-    if (API_endpoint) {
-      updateFields.push('API_endpoint = ?');
-      updateValues.push(API_endpoint);
-    }
-
-    if (updateFields.length === 0) {
-      return res.status(400).json({ error: 'No fields to update' });
-    }
-
-    updateValues.push(providerId);
-
-    const query = `UPDATE providers SET ${updateFields.join(', ')} WHERE provider_id = ?`;
-    const result = await conn.query(query, updateValues);
-
-    if (result[0].affectedRows === 0) {
+    const provider = await getProviderById(req.params.providerId);
+    if (!provider) {
       return res.status(404).json({ error: 'Provider not found' });
     }
 
-    res.json({ message: 'Provider updated successfully' });
-  } catch (err) {
-    console.error('Provider update error:', err.message);
-    if (err.code === 'ER_DUP_ENTRY') {
-      return res.status(409).json({ error: 'Email or API endpoint already in use' });
+    const sourceList = req.body.sources || ['redPlug', 'greenPlug', 'bluePlug'];
+    const syncResults = {};
+
+    for (const providerName of sourceList) {
+      try {
+        const adapter = ProviderAdapterFactory.createAdapter(providerName);
+        const status = await adapter.checkStatus();
+        syncResults[providerName] = { status: 'synced', data: status };
+      } catch (err) {
+        syncResults[providerName] = { status: 'failed', error: err.message };
+      }
     }
-    res.status(500).json({ error: 'Provider update failed', message: err.message });
-  } finally {
-    conn.release();
+
+    return res.json({
+      message: 'Provider sync completed',
+      provider,
+      syncDetails: syncResults
+    });
+  } catch (err) {
+    return res.status(500).json({
+      error: 'Provider sync failed',
+      message: err.message
+    });
   }
 });
 
-/**
- * DELETE /providers/:providerId
- * Delete a provider
- */
-app.delete('/providers/:providerId', verifyAuth, async (req, res) => {
-  const conn = await pool.getConnection();
+app.get('/providers/status/all', async (req, res) => {
   try {
-    const { providerId } = req.params;
+    const statusList = {};
 
-    const result = await conn.query(
-      `DELETE FROM providers WHERE provider_id = ?`,
-      [providerId]
-    );
-
-    if (result[0].affectedRows === 0) {
-      return res.status(404).json({ error: 'Provider not found' });
+    for (const providerName of ['redPlug', 'greenPlug', 'bluePlug']) {
+      try {
+        const adapter = ProviderAdapterFactory.createAdapter(providerName);
+        statusList[providerName] = await adapter.checkStatus();
+      } catch (err) {
+        statusList[providerName] = {
+          provider: providerName,
+          status: 'error',
+          error: err.message
+        };
+      }
     }
 
-    res.json({ message: 'Provider deleted successfully' });
+    return res.json({
+      timestamp: new Date(),
+      statuses: statusList
+    });
   } catch (err) {
-    console.error('Provider delete error:', err.message);
-    res.status(500).json({ error: 'Provider deletion failed', message: err.message });
-  } finally {
-    conn.release();
+    return res.status(500).json({
+      error: 'Failed to check statuses',
+      message: err.message
+    });
   }
 });
 
-/**
- * POST /providers/:providerId/validate
- * Validate provider credentials
- */
-app.post('/providers/:providerId/validate', async (req, res) => {
-  const conn = await pool.getConnection();
-  try {
-    const { providerId } = req.params;
-    const { password } = req.body;
-
-    if (!password) {
-      return res.status(400).json({ error: 'Password required' });
-    }
-
-    const [providers] = await conn.query(
-      `SELECT password_hash FROM providers WHERE provider_id = ?`,
-      [providerId]
-    );
-
-    if (providers.length === 0) {
-      return res.status(404).json({ error: 'Provider not found' });
-    }
-
-    const isValid = await bcrypt.compare(password, providers[0].password_hash);
-
-    res.json({ valid: isValid });
-  } catch (err) {
-    console.error('Validation error:', err.message);
-    res.status(500).json({ error: 'Validation failed', message: err.message });
-  } finally {
-    conn.release();
-  }
-});
-
-/**
- * GET /providers/health
- * Service health check
- */
 app.get('/providers/health', async (req, res) => {
-  const conn = await pool.getConnection();
   try {
-    await conn.query('SELECT 1');
-
-    res.json({
+    const [rows] = await pool.query('SELECT COUNT(*) AS total FROM Provider');
+    return res.json({
       status: 'healthy',
       service: 'Provider Management Service',
       port: PORT,
-      database: process.env.DB_NAME || 'provider_db',
-      timestamp: new Date()
+      timestamp: new Date(),
+      registeredProviders: Number(rows[0].total || 0)
     });
   } catch (err) {
-    res.status(503).json({
-      status: 'unhealthy',
-      error: 'Database connection failed',
-      message: err.message
-    });
-  } finally {
-    conn.release();
-  }
-});
-
-/**
- * GET /health
- * Alias for health check
- */
-app.get('/health', async (req, res) => {
-  const conn = await pool.getConnection();
-  try {
-    await conn.query('SELECT 1');
-
-    res.json({
-      status: 'ok',
-      service: 'provider-management-service',
-      timestamp: new Date()
-    });
-  } catch (err) {
-    res.status(503).json({
+    return res.status(503).json({
       status: 'error',
+      service: 'Provider Management Service',
       message: err.message
     });
-  } finally {
-    conn.release();
   }
 });
 
-/**
- * Error handling
- */
 app.use((err, req, res, next) => {
-  console.error('Unhandled error:', err);
-  res.status(err.status || 500).json({
+  return res.status(err.status || 500).json({
     error: err.message || 'Internal server error',
     status: err.status || 500
   });
 });
 
-// ============== SERVER STARTUP ==============
-
-async function start() {
-  try {
-    // Test database connection
-    const conn = await pool.getConnection();
-    await conn.query('SELECT 1');
-    conn.release();
-
+initializeDatabase()
+  .then(() => {
     app.listen(PORT, () => {
-      console.log(`✅ Provider Management Service listening on port ${PORT}`);
-      console.log(`📍 Database: ${process.env.DB_NAME || 'provider_db'}`);
-      console.log(`📍 DB Host: ${process.env.DB_HOST || 'mariadb'}`);
+      console.log(`Provider Management Service listening on port ${PORT}`);
+      console.log(`MariaDB connected: ${DB_HOST}:${DB_PORT}/${DB_NAME}`);
     });
-  } catch (err) {
-    console.error('Failed to start service:', err.message);
+  })
+  .catch((err) => {
+    console.error('Failed to start Provider Management Service:', err.message);
     process.exit(1);
-  }
-}
-
-start();
+  });
 
 module.exports = app;
-
