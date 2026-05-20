@@ -157,7 +157,7 @@ const MESSAGE_SCHEMAS = {
   },
   'payment.processed': {
     type: 'object',
-    required: ['paymentId', 'invoiceId', 'providerId', 'amount', 'currency', 'status'],
+    required: ['paymentId', 'invoiceId', 'amount', 'currency', 'status'],
     properties: {
       paymentId: { type: ['string', 'number'] },
       invoiceId: { type: ['string', 'number'] },

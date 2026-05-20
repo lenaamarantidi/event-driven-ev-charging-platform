@@ -1,123 +1,66 @@
 /**
- * Payment Service v2
- * 
- * Processes and tracks payment transactions
- * - Payment processing for reservations
- * - Payment status tracking
- * - Provider integration
- * - Publishes events to Message Broker
+ * Payment Service
+ * Simplified MariaDB-backed payment management with Payment table
  * Port: 3107
  */
 
 const express = require('express');
-const { Pool } = require('pg');
-const { v4: uuidv4 } = require('uuid');
+const mysql = require('mysql2/promise');
 const axios = require('axios');
 
 const app = express();
 app.use(express.json());
 
-const PORT = process.env.PORT || 3107;
+const PORT = Number(process.env.PORT || 3107);
+const DB_HOST = process.env.DB_HOST || 'localhost';
+const DB_PORT = Number(process.env.DB_PORT || 3306);
 const DB_USER = process.env.DB_USER || 'payment_user';
 const DB_PASSWORD = process.env.DB_PASSWORD || 'payment_pass';
-const DB_HOST = process.env.DB_HOST || 'localhost';
-const DB_PORT = process.env.DB_PORT || 5432;
 const DB_NAME = process.env.DB_NAME || 'payment_db';
 const MESSAGE_BROKER_URL = process.env.MESSAGE_BROKER_URL || 'http://localhost:3003';
 
-// ============== DATABASE ==============
-
-const pool = new Pool({
-  user: DB_USER,
-  password: DB_PASSWORD,
+const pool = mysql.createPool({
   host: DB_HOST,
   port: DB_PORT,
+  user: DB_USER,
+  password: DB_PASSWORD,
   database: DB_NAME,
-  max: 20,
-  idleTimeoutMillis: 30000,
-  connectionTimeoutMillis: 5000
+  waitForConnections: true,
+  connectionLimit: 10,
+  queueLimit: 0
 });
-
-pool.on('error', (err) => {
-  console.error('Unexpected error on idle client', err);
-});
-
-// ============== DATABASE INITIALIZATION ==============
 
 async function initializeDatabase() {
-  const client = await pool.connect();
-
-  try {
-    console.log('📋 Initializing Payment database...');
-
-    // Create payments table
-    await client.query(`
-      CREATE TABLE IF NOT EXISTS payments (
-        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-        reservation_id UUID NOT NULL,
-        user_id UUID NOT NULL,
-        provider VARCHAR(50),
-        amount DECIMAL(10, 2) NOT NULL,
-        currency VARCHAR(3) DEFAULT 'EUR',
-        status VARCHAR(50) DEFAULT 'pending',
-        payment_method VARCHAR(50),
-        transaction_id VARCHAR(100),
-        gateway_response JSONB,
-        created_at TIMESTAMP DEFAULT NOW(),
-        updated_at TIMESTAMP DEFAULT NOW()
-      );
-
-      CREATE INDEX IF NOT EXISTS idx_payments_reservation ON payments(reservation_id);
-      CREATE INDEX IF NOT EXISTS idx_payments_user ON payments(user_id);
-      CREATE INDEX IF NOT EXISTS idx_payments_status ON payments(status);
-      CREATE INDEX IF NOT EXISTS idx_payments_created ON payments(created_at DESC);
-    `);
-
-    // Create payment logs
-    await client.query(`
-      CREATE TABLE IF NOT EXISTS payment_logs (
-        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-        payment_id UUID NOT NULL REFERENCES payments(id),
-        event_type VARCHAR(100) NOT NULL,
-        status_from VARCHAR(50),
-        status_to VARCHAR(50),
-        details JSONB,
-        created_at TIMESTAMP DEFAULT NOW()
-      );
-
-      CREATE INDEX IF NOT EXISTS idx_payment_logs_payment ON payment_logs(payment_id);
-      CREATE INDEX IF NOT EXISTS idx_payment_logs_event ON payment_logs(event_type);
-    `);
-
-    console.log('✓ Payment database initialized');
-  } catch (err) {
-    console.error('❌ Database initialization error:', err.message);
-    throw err;
-  } finally {
-    client.release();
-  }
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS Payment (
+      payment_id INT(10) UNSIGNED PRIMARY KEY AUTO_INCREMENT,
+      invoice_id INT(10) UNSIGNED,
+      amount DECIMAL(10,2),
+      status VARCHAR(255),
+      paid_at TIMESTAMP NULL DEFAULT NULL,
+      INDEX idx_payment_invoice (invoice_id),
+      INDEX idx_payment_status (status),
+      INDEX idx_payment_paid_at (paid_at)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+  `);
 }
 
-// ============== HELPER FUNCTIONS ==============
-
-/**
- * Log payment event
- */
-async function logPaymentEvent(paymentId, eventType, statusFrom, statusTo, details = {}) {
-  try {
-    await pool.query(
-      `INSERT INTO payment_logs (payment_id, event_type, status_from, status_to, details)
-       VALUES ($1, $2, $3, $4, $5)`,
-      [paymentId, eventType, statusFrom, statusTo, JSON.stringify(details)]
-    );
-  } catch (err) {
-    console.error('Error logging payment event:', err.message);
+function toInt(value) {
+  if (value === undefined || value === null || value === '') {
+    return null;
   }
+  const parsed = Number.parseInt(value, 10);
+  return Number.isNaN(parsed) ? null : parsed;
 }
 
-/**
- * Publish event to message broker
- */
+function toDecimal(value) {
+  if (value === undefined || value === null || value === '') {
+    return null;
+  }
+  const parsed = Number.parseFloat(value);
+  return Number.isNaN(parsed) ? null : parsed;
+}
+
 async function publishEvent(eventType, data) {
   try {
     await axios.post(
@@ -126,268 +69,237 @@ async function publishEvent(eventType, data) {
         eventType,
         data: {
           ...data,
-          timestamp: new Date(),
-          source: 'payment-service'
+          sourceService: 'payment-service'
         }
       },
       { timeout: 5000 }
     );
-
-    console.log(`✓ Event published: ${eventType}`);
   } catch (err) {
-    console.error(`⚠️ Failed to publish event ${eventType}:`, err.message);
+    console.error(`Event publish failed (${eventType}):`, err.message);
   }
 }
 
-// ============== REST ENDPOINTS ==============
-
-/**
- * GET /
- * Service info
- */
 app.get('/', (req, res) => {
   res.json({
-    service: 'Payment Service v2',
-    version: '2.0.0',
-    port: PORT,
-    mode: 'transaction-processing',
-    database: DB_NAME
+    service: 'Payment Service',
+    version: '3.0.0',
+    mode: 'mariadb-payment',
+    port: PORT
   });
 });
 
-/**
- * POST /api/payments
- * Create and process a payment
- */
 app.post('/api/payments', async (req, res) => {
-  const client = await pool.connect();
-
   try {
-    const { reservationId, userId, provider, amount, paymentMethod } = req.body;
+    const { invoice_id, amount, status } = req.body;
 
-    if (!reservationId || !userId || !amount) {
-      return res.status(400).json({ error: 'Missing required fields' });
+    const normalizedStatus = status || 'pending';
+    const paidAt = normalizedStatus === 'paid' ? new Date() : null;
+
+    const [result] = await pool.query(
+      `INSERT INTO Payment (invoice_id, amount, status, paid_at)
+       VALUES (?, ?, ?, ?)`,
+      [toInt(invoice_id), toDecimal(amount), normalizedStatus, paidAt]
+    );
+
+    const [rows] = await pool.query(
+      `SELECT payment_id, invoice_id, amount, status, paid_at
+       FROM Payment
+       WHERE payment_id = ?`,
+      [result.insertId]
+    );
+
+    const payment = rows[0];
+
+    if (payment.status === 'paid') {
+      await publishEvent('payment.processed', {
+        paymentId: payment.payment_id,
+        invoiceId: payment.invoice_id,
+        providerId: req.body.provider_id ?? req.body.providerId,
+        amount: Number(payment.amount || 0),
+        currency: 'EUR',
+        status: payment.status,
+        paidAt: payment.paid_at
+      });
     }
 
-    await client.query('BEGIN');
-
-    // Create payment record
-    const result = await client.query(
-      `INSERT INTO payments (reservation_id, user_id, provider, amount, payment_method, status)
-       VALUES ($1, $2, $3, $4, $5, 'processing')
-       RETURNING id, created_at`,
-      [reservationId, userId, provider, amount, paymentMethod]
-    );
-
-    const paymentId = result.rows[0].id;
-
-    await logPaymentEvent(paymentId, 'created', null, 'processing', { amount });
-
-    // Simulate payment processing success
-    const gatewayResponse = {
-      transactionId: `txn_${Date.now()}`,
-      timestamp: new Date(),
-      amount
-    };
-
-    // Update payment
-    await client.query(
-      `UPDATE payments SET status = 'completed', transaction_id = $1, gateway_response = $2, updated_at = NOW()
-       WHERE id = $3`,
-      [gatewayResponse.transactionId, JSON.stringify(gatewayResponse), paymentId]
-    );
-
-    await logPaymentEvent(paymentId, 'completed', 'processing', 'completed', gatewayResponse);
-    await client.query('COMMIT');
-
-    // Publish event
-    await publishEvent('PaymentCompleted', {
-      paymentId,
-      reservationId,
-      userId,
-      amount,
-      transactionId: gatewayResponse.transactionId
-    });
-
-    res.status(201).json({
-      message: 'Payment successful',
-      paymentId,
-      status: 'completed',
-      amount
+    return res.status(201).json({
+      message: 'Payment created',
+      payment
     });
   } catch (err) {
-    await client.query('ROLLBACK');
-    console.error('Payment error:', err.message);
-    res.status(500).json({ error: 'Payment failed' });
-  } finally {
-    client.release();
+    return res.status(500).json({
+      error: 'Failed to create payment',
+      message: err.message
+    });
   }
 });
 
-/**
- * GET /api/payments/:paymentId
- * Get payment details
- */
 app.get('/api/payments/:paymentId', async (req, res) => {
   try {
-    const result = await pool.query(`SELECT * FROM payments WHERE id = $1`, [req.params.paymentId]);
+    const [rows] = await pool.query(
+      `SELECT payment_id, invoice_id, amount, status, paid_at
+       FROM Payment
+       WHERE payment_id = ?`,
+      [toInt(req.params.paymentId)]
+    );
 
-    if (result.rows.length === 0) {
+    if (!rows.length) {
       return res.status(404).json({ error: 'Payment not found' });
     }
 
-    res.json(result.rows[0]);
+    return res.json(rows[0]);
   } catch (err) {
-    res.status(500).json({ error: 'Failed to fetch payment' });
+    return res.status(500).json({
+      error: 'Failed to fetch payment',
+      message: err.message
+    });
   }
 });
 
-/**
- * GET /api/payments/user/:userId
- * Get user payments
- */
-app.get('/api/payments/user/:userId', async (req, res) => {
+app.get('/api/payments', async (req, res) => {
   try {
-    const { limit = 50, offset = 0 } = req.query;
+    const { invoice_id, status, limit = 100, offset = 0 } = req.query;
 
-    const result = await pool.query(
-      `SELECT * FROM payments WHERE user_id = $1 ORDER BY created_at DESC LIMIT $2 OFFSET $3`,
-      [req.params.userId, limit, offset]
+    let query = `
+      SELECT payment_id, invoice_id, amount, status, paid_at
+      FROM Payment
+      WHERE 1=1
+    `;
+
+    const values = [];
+
+    if (invoice_id) {
+      query += ' AND invoice_id = ?';
+      values.push(toInt(invoice_id));
+    }
+
+    if (status) {
+      query += ' AND status = ?';
+      values.push(status);
+    }
+
+    query += ' ORDER BY payment_id DESC LIMIT ? OFFSET ?';
+    values.push(toInt(limit) || 100, toInt(offset) || 0);
+
+    const [rows] = await pool.query(query, values);
+
+    return res.json({
+      total: rows.length,
+      payments: rows
+    });
+  } catch (err) {
+    return res.status(500).json({
+      error: 'Failed to fetch payments',
+      message: err.message
+    });
+  }
+});
+
+app.post('/api/payments/:paymentId/status', async (req, res) => {
+  try {
+    const paymentId = toInt(req.params.paymentId);
+    const { status } = req.body;
+
+    if (!status) {
+      return res.status(400).json({ error: 'status is required' });
+    }
+
+    const paidAt = status === 'paid' ? new Date() : null;
+
+    await pool.query(
+      `UPDATE Payment SET status = ?, paid_at = ? WHERE payment_id = ?`,
+      [status, paidAt, paymentId]
     );
 
-    res.json({
-      total: result.rows.length,
-      payments: result.rows
+    const [rows] = await pool.query(
+      `SELECT payment_id, invoice_id, amount, status, paid_at
+       FROM Payment
+       WHERE payment_id = ?`,
+      [paymentId]
+    );
+
+    if (!rows.length) {
+      return res.status(404).json({ error: 'Payment not found' });
+    }
+
+    const payment = rows[0];
+
+    if (status === 'paid') {
+      await publishEvent('payment.processed', {
+        paymentId: payment.payment_id,
+        invoiceId: payment.invoice_id,
+        providerId: req.body.provider_id ?? req.body.providerId,
+        amount: Number(payment.amount || 0),
+        currency: 'EUR',
+        status: payment.status,
+        paidAt: payment.paid_at
+      });
+    }
+
+    return res.json({
+      message: 'Payment status updated',
+      payment
     });
   } catch (err) {
-    res.status(500).json({ error: 'Failed to fetch payments' });
+    return res.status(500).json({
+      error: 'Failed to update payment status',
+      message: err.message
+    });
   }
 });
 
-/**
- * GET /api/payments/status/summary
- * Get status summary
- */
 app.get('/api/payments/status/summary', async (req, res) => {
   try {
-    const result = await pool.query(`
-      SELECT status, COUNT(*) as count, SUM(amount) as total_amount
-      FROM payments GROUP BY status
+    const [rows] = await pool.query(`
+      SELECT status, COUNT(*) AS count, SUM(amount) AS total_amount
+      FROM Payment
+      GROUP BY status
     `);
 
-    res.json({
-      summary: result.rows,
-      timestamp: new Date()
+    return res.json({
+      summary: rows,
+      timestamp: new Date().toISOString()
     });
   } catch (err) {
-    res.status(500).json({ error: 'Failed to fetch summary' });
+    return res.status(500).json({
+      error: 'Failed to fetch summary',
+      message: err.message
+    });
   }
 });
 
-/**
- * GET /health
- * Health check
- */
 app.get('/health', async (req, res) => {
   try {
     await pool.query('SELECT 1');
+    const [countRows] = await pool.query('SELECT COUNT(*) AS total FROM Payment');
 
-    res.json({
-      status: 'ok',
+    return res.json({
+      status: 'healthy',
       service: 'payment-service',
       port: PORT,
       database: DB_NAME,
-      timestamp: new Date()
+      totalPayments: Number(countRows[0].total || 0),
+      timestamp: new Date().toISOString()
     });
   } catch (err) {
-    res.status(503).json({
+    return res.status(503).json({
       status: 'error',
       service: 'payment-service',
-      error: err.message
+      message: err.message
     });
   }
 });
 
-// ============== SERVER STARTUP ==============
-
-async function start() {
-  try {
-    await initializeDatabase();
-
-    const server = app.listen(PORT, () => {
-      console.log(`✓ Payment Service v2 running on port ${PORT}`);
-      console.log(`✓ Database: ${DB_NAME}\n`);
+initializeDatabase()
+  .then(() => {
+    app.listen(PORT, () => {
+      console.log(`Payment Service listening on port ${PORT}`);
+      console.log(`MariaDB connected: ${DB_HOST}:${DB_PORT}/${DB_NAME}`);
     });
-
-    process.on('SIGTERM', () => {
-      console.log('SIGTERM received, closing connections');
-      server.close(() => {
-        pool.end();
-        process.exit(0);
-      });
-    });
-
-    process.on('SIGINT', () => {
-      console.log('SIGINT received, closing connections');
-      server.close(() => {
-        pool.end();
-        process.exit(0);
-      });
-    });
-  } catch (err) {
+  })
+  .catch((err) => {
     console.error('Failed to start Payment Service:', err.message);
     process.exit(1);
-  }
-}
-
-start();
-
-module.exports = app;
-      wallets.set(transaction.userId, wallet);
-    }
-
-    res.json({
-      message: 'Refund processed',
-      transaction
-    });
-  } catch (err) {
-    console.error('Refund error:', err);
-    res.status(500).json({ error: 'Refund failed', message: err.message });
-  }
-});
-
-/**
- * GET /payments/health
- * Service health check
- */
-app.get('/payments/health', (req, res) => {
-  res.json({
-    status: 'healthy',
-    service: 'Payment Service',
-    port: PORT,
-    timestamp: new Date(),
-    metrics: {
-      totalTransactions: transactions.size,
-      totalWallets: wallets.size,
-      totalSubscriptions: subscriptions.size
-    }
   });
-});
-
-/**
- * Error handling
- */
-app.use((err, req, res, next) => {
-  console.error('Unhandled error:', err);
-  res.status(err.status || 500).json({
-    error: err.message || 'Internal server error',
-    status: err.status || 500
-  });
-});
-
-// Start server
-app.listen(PORT, () => {
-  console.log(`✅ Payment Service listening on port ${PORT}`);
-});
 
 module.exports = app;
