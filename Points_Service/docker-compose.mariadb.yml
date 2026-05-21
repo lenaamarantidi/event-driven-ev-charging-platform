@@ -1,0 +1,28 @@
+services:
+  mariadb-central:
+    image: mariadb:11
+    container_name: saasplug-points-mariadb-central
+    environment:
+      MYSQL_ROOT_PASSWORD: root
+      MYSQL_DATABASE: central
+    ports:
+      - "3307:3306"
+    healthcheck:
+      test: ["CMD", "mariadb-admin", "ping", "-h", "localhost", "-uroot", "-proot"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    networks:
+      - saasplug-points-network
+    volumes:
+      - points-mariadb-central-data:/var/lib/mysql
+      - ./db/central-db.sql:/docker-entrypoint-initdb.d/01-central.sql:ro
+    restart: unless-stopped
+
+networks:
+  saasplug-points-network:
+    driver: bridge
+
+volumes:
+  points-mariadb-central-data:
+

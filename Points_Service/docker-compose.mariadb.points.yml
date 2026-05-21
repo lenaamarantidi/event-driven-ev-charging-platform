@@ -1,0 +1,94 @@
+services:
+  points-red:
+    image: mariadb:11
+    container_name: points-red
+    environment:
+      MYSQL_ROOT_PASSWORD: root
+      MYSQL_DATABASE: central
+    ports:
+      - "${points_db_red_port}:3306"
+    healthcheck:
+      test: ["CMD", "mariadb-admin", "ping", "-h", "localhost", "-uroot", "-proot"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    networks:
+      - saasplug-points-network
+    volumes:
+      - points-red-data:/var/lib/mysql
+      - ./db/central-db.sql:/docker-entrypoint-initdb.d/01-central.sql:ro
+    restart: unless-stopped
+
+  points-green:
+    image: mariadb:11
+    container_name: points-green
+    environment:
+      MYSQL_ROOT_PASSWORD: root
+      MYSQL_DATABASE: central
+    ports:
+      - "${points_db_green_port}:3306"
+    healthcheck:
+      test: ["CMD", "mariadb-admin", "ping", "-h", "localhost", "-uroot", "-proot"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    networks:
+      - saasplug-points-network
+    volumes:
+      - points-green-data:/var/lib/mysql
+      - ./db/central-db.sql:/docker-entrypoint-initdb.d/01-central.sql:ro
+    restart: unless-stopped
+
+  points-blue:
+    image: mariadb:11
+    container_name: points-blue
+    environment:
+      MYSQL_ROOT_PASSWORD: root
+      MYSQL_DATABASE: central
+    ports:
+      - "${points_db_blue_port}:3306"
+    healthcheck:
+      test: ["CMD", "mariadb-admin", "ping", "-h", "localhost", "-uroot", "-proot"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    networks:
+      - saasplug-points-network
+    volumes:
+      - points-blue-data:/var/lib/mysql
+      - ./db/central-db.sql:/docker-entrypoint-initdb.d/01-central.sql:ro
+    restart: unless-stopped
+
+  points-central:
+    image: mariadb:11
+    container_name: points-central
+    environment:
+      MYSQL_ROOT_PASSWORD: root
+      MYSQL_DATABASE: central
+    ports:
+      - "${points_db_central_port}:3306"
+    healthcheck:
+      test: ["CMD", "mariadb-admin", "ping", "-h", "localhost", "-uroot", "-proot"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    networks:
+      - saasplug-points-network
+    volumes:
+      - points-central-data:/var/lib/mysql
+      - ./db/central-db.sql:/docker-entrypoint-initdb.d/01-central.sql:ro
+    restart: unless-stopped
+
+networks:
+  saasplug-points-network:
+    driver: bridge
+
+volumes:
+  points-red-data:
+  points-green-data:
+  points-blue-data:
+  points-central-data:
+
+
+
+

@@ -1,5 +1,7 @@
 -- Central Database Schema
 -- Αποθήκευση όλων των σημείων φόρτισης από τους 3 παρόχους
+CREATE DATABASE IF NOT EXISTS central;
+USE central;
 
 CREATE TABLE IF NOT EXISTS charging_points (
     id VARCHAR(36) PRIMARY KEY,
@@ -10,6 +12,9 @@ CREATE TABLE IF NOT EXISTS charging_points (
     status VARCHAR(50) NOT NULL,
     capacity_kw INT NOT NULL,
     kwh_price DECIMAL(10, 4),
+    connector VARCHAR(255),
+    location_name VARCHAR(255),
+    address VARCHAR(255),
     reservation_end_time TIMESTAMP,
     last_updated TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,

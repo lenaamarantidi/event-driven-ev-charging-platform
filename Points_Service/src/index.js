@@ -10,7 +10,8 @@
  */
 
 const express = require('express');
-const { Pool } = require('pg');
+const mysql = require('mysql2/promise');
+
 const axios = require('axios');
 const { v4: uuidv4 } = require('uuid');
 
@@ -18,84 +19,75 @@ const app = express();
 app.use(express.json());
 
 // ============== DATABASE CONFIGURATION ==============
-const pool = new Pool({
-  connectionString: process.env.POINTS_DB_URL || 'postgresql://postgres:password@localhost:5432/points_service',
-  max: 20,
-  idleTimeoutMillis: 30000,
-  connectionTimeoutMillis: 2000,
+const pointsMysql = mysql.createPool({
+  host: process.env.MARIADB_HOST || 'saasplug-points-mariadb-central',
+  port: process.env.MARIADB_PORT ? Number(process.env.MARIADB_PORT) : 3306,
+  user: process.env.MARIADB_USER || 'root',
+  password: process.env.MARIADB_PASSWORD || 'root',
+
+  // Your compose maps host 5432 -> container 3306.
+  // Using 127.0.0.1 avoids occasional localhost/IPv6 issues.
+  connectTimeout: process.env.MARIADB_CONNECT_TIMEOUT ? Number(process.env.MARIADB_CONNECT_TIMEOUT) : 5000,
+  // MariaDB can be strict; explicitly disable TLS unless you configure it.
+  ssl: process.env.MARIADB_SSL ? JSON.parse(process.env.MARIADB_SSL) : false,
+
+  // IMPORTANT: don't hard-fail on pool creation if DB doesn't exist yet.
+  // We'll switch to `central` after connecting.
+  database: undefined,
+
+  waitForConnections: true,
+  connectionLimit: 20,
+  queueLimit: 0,
 });
+
 
 // ============== DATABASE INITIALIZATION ==============
 
 async function initializeDatabase() {
-  const client = await pool.connect();
+  // With your MariaDB init (`central-db.sql`) tables are created at container boot.
+  // Keep a lightweight runtime check so the service fails fast if the schema isn't present.
   try {
-    // Create tables
-    await client.query(`
-      CREATE TABLE IF NOT EXISTS charging_points (
-        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-        provider VARCHAR(50) NOT NULL CHECK (provider IN ('redPlug', 'greenPlug', 'bluePlug')),
-        external_id VARCHAR(255) NOT NULL UNIQUE,
-        name VARCHAR(255),
-        latitude DECIMAL(10, 8) NOT NULL,
-        longitude DECIMAL(11, 8) NOT NULL,
-        capacity_kw INTEGER,
-        price_per_kwh DECIMAL(10, 4),
-        status VARCHAR(50) DEFAULT 'available' CHECK (status IN ('available', 'reserved', 'offline', 'maintenance')),
-        reserved_until TIMESTAMP,
-        reserved_by UUID,
-        last_synced TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-        raw_data JSONB
-      );
-      
-      CREATE INDEX IF NOT EXISTS idx_provider ON charging_points(provider);
-      CREATE INDEX IF NOT EXISTS idx_status ON charging_points(status);
-      CREATE INDEX IF NOT EXISTS idx_external_id ON charging_points(external_id);
-      CREATE INDEX IF NOT EXISTS idx_location ON charging_points USING GIST(
-        ll_to_earth(latitude, longitude)
-      );
-      
-      CREATE TABLE IF NOT EXISTS points_sync_log (
-        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-        provider VARCHAR(50) NOT NULL,
-        sync_type VARCHAR(50) DEFAULT 'full',
-        total_points INTEGER,
-        new_points INTEGER,
-        updated_points INTEGER,
-        deleted_points INTEGER,
-        duration_ms INTEGER,
-        status VARCHAR(50) DEFAULT 'success',
-        error_message TEXT,
-        synced_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-      );
-      
-      CREATE INDEX IF NOT EXISTS idx_sync_log_provider ON points_sync_log(provider);
-      CREATE INDEX IF NOT EXISTS idx_sync_log_date ON points_sync_log(synced_at);
-      
-      CREATE TABLE IF NOT EXISTS points_clicks (
-        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-        point_id UUID NOT NULL REFERENCES charging_points(id) ON DELETE CASCADE,
-        user_id UUID,
-        click_type VARCHAR(50) NOT NULL CHECK (click_type IN ('view', 'reserve_attempt', 'details')),
-        clicked_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-      );
-      
-      CREATE INDEX IF NOT EXISTS idx_clicks_point ON points_clicks(point_id);
-      CREATE INDEX IF NOT EXISTS idx_clicks_user ON points_clicks(user_id);
-      CREATE INDEX IF NOT EXISTS idx_clicks_date ON points_clicks(clicked_at);
-    `);
+    // Don't require a pre-selected database for connectivity.
+    await pointsMysql.query('SELECT 1');
 
-    console.log('✓ Database initialized successfully');
+    const dbName = process.env.MARIADB_DB || 'central';
+    // Make sure the schema exists and select it.
+
+    // Note: the container init may create the DB slightly later than the Node start.
+
+    // If it doesn't exist yet (first boot race), wait until it appears.
+    const maxAttempts = Number(process.env.MARIADB_DB_WAIT_ATTEMPTS || 10);
+    const attemptDelayMs = Number(process.env.MARIADB_DB_WAIT_DELAY_MS || 1000);
+
+    let lastErr;
+    for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+      try {
+        await pointsMysql.query(`USE \`${dbName}\``);
+        console.log(`✓ MariaDB connection ok (using database: ${dbName})`);
+        lastErr = null;
+        break;
+      } catch (useErr) {
+        lastErr = useErr;
+        console.warn(`⚠️ Database ${dbName} not ready yet (attempt ${attempt}/${maxAttempts})`, useErr.message);
+        await new Promise(r => setTimeout(r, attemptDelayMs));
+      }
+    }
+
+    if (lastErr) {
+      throw lastErr;
+    }
+
+
+
+
   } catch (err) {
     console.error('✗ Database initialization error:', err.message);
-  } finally {
-    client.release();
+    throw err;
   }
 }
 
 initializeDatabase();
+
 
 // ============== PROVIDER MAPPING ==============
 
@@ -194,9 +186,9 @@ async function fetchFromProvider(provider) {
  * Sync points from provider to database
  */
 async function syncProviderPoints(provider) {
-  const client = await pool.connect();
+  const client = await pointsMysql.getConnection();
   try {
-    await client.query('BEGIN');
+    await client.beginTransaction();
 
     const startTime = Date.now();
     const points = await fetchFromProvider(provider);
@@ -316,14 +308,15 @@ app.get('/api/points', async (req, res) => {
       params.push(lat, lon, radius * 1000); // Convert km to meters
     }
 
-    query += ' LIMIT 100';
+query += ' LIMIT 100';
 
-    const result = await pool.query(query, params);
-    
+    const [rows] = await pointsMysql.query(query, params);
+
     res.json({
-      count: result.rows.length,
-      points: result.rows
+      count: rows.length,
+      points: rows
     });
+
   } catch (err) {
     console.error('Error fetching points:', err.message);
     res.status(500).json({ error: 'Failed to fetch points' });
@@ -338,7 +331,7 @@ app.get('/api/points/:pointId', async (req, res) => {
   try {
     const { pointId } = req.params;
 
-    const result = await pool.query(
+    const result = await pointsMysql.query(
       'SELECT * FROM charging_points WHERE id = $1 OR external_id = $1',
       [pointId]
     );
@@ -367,7 +360,7 @@ app.get('/api/points/status/:status', async (req, res) => {
       return res.status(400).json({ error: 'Invalid status' });
     }
 
-    const result = await pool.query(
+    const result = await pointsMysql.query(
       'SELECT * FROM charging_points WHERE status = $1 LIMIT 100',
       [status]
     );
@@ -395,7 +388,7 @@ app.post('/api/points/click', async (req, res) => {
       return res.status(400).json({ error: 'Invalid click type' });
     }
 
-    const result = await pool.query(
+    const result = await pointsMysql.query(
       `INSERT INTO points_clicks (point_id, user_id, click_type)
        VALUES ($1, $2, $3)
        RETURNING *`,
@@ -436,7 +429,7 @@ app.get('/api/points/sync/log', async (req, res) => {
     query += ' ORDER BY synced_at DESC LIMIT $' + (params.length + 1);
     params.push(parseInt(limit));
 
-    const result = await pool.query(query, params);
+    const result = await pointsMysql.query(query, params);
 
     res.json({
       logs: result.rows
@@ -506,11 +499,12 @@ app.post('/api/points/sync/all', async (req, res) => {
  */
 app.get('/health', async (req, res) => {
   try {
-    const result = await pool.query('SELECT 1');
-    
+    const result = await pointsMysql.query('SELECT 1');
+
     res.json({
       status: 'ok',
-      service: 'points-service',
+
+      service: process.env.SERVICE || 'points-service',
       port: process.env.PORT || 3001,
       database: 'connected',
       timestamp: new Date()
@@ -531,14 +525,14 @@ const PORT = process.env.PORT || 3001;
 
 const server = app.listen(PORT, () => {
   console.log(`✓ Points Service running on port ${PORT}`);
-  console.log(`✓ Database: ${process.env.POINTS_DB_URL || 'postgresql://localhost:5432/points_service'}`);
+  console.log(`✓ MariaDB: ${process.env.MARIADB_HOST || 'localhost'}:${process.env.MARIADB_PORT || 5432}/${process.env.MARIADB_DB || '(no db selected)'}`);
 });
 
 // Graceful shutdown
 process.on('SIGTERM', () => {
   console.log('SIGTERM received, shutting down gracefully');
   server.close(() => {
-    pool.end();
+    pointsMysql.end();
     process.exit(0);
   });
 });
