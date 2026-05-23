@@ -58,17 +58,19 @@ fi
 pids=()
 
 for i in {0..3}; do
-  echo "Starting service PORT=${free_ports[$i]} MARIADB_PORT=${ports[$i]}"
+  echo "Starting service ${services[$i]} listening at PORT=${free_ports[$i]} with its MARIADB_PORT=${ports[$i]}"
 
   SERVICE=${services[$i]} \
   PORT=${free_ports[$i]} \
   MARIADB_PORT=${ports[$i]} \
+  MARIADB_HOST=localhost \
+  BEARER_TOKEN=sk_saas_5dec282b47047b6eced41e64 \
   node src/index.js > "service_$i.log" 2>&1 &
 
   pids+=($!)
 done
 
-echo "NODE PIDs: ${pids[@]}"
+echo "NODE PIDs: ${pids[@]} resp. for ${services[@]}"
 export ENV_VAR_POINTS_NODE_PIDS="${pids[@]}"
 echo $ENV_VAR_POINTS_NODE_PIDS > temp_nodes_pids.log
 

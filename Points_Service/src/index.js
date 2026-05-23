@@ -19,22 +19,15 @@ const app = express();
 app.use(express.json());
 
 // ============== DATABASE CONFIGURATION ==============
+const dbName = process.env.MARIADB_DB || 'central';
 const pointsMysql = mysql.createPool({
-  host: process.env.MARIADB_HOST || 'saasplug-points-mariadb-central',
+  host: process.env.MARIADB_HOST || 'unknown-host',
   port: process.env.MARIADB_PORT ? Number(process.env.MARIADB_PORT) : 3306,
   user: process.env.MARIADB_USER || 'root',
   password: process.env.MARIADB_PASSWORD || 'root',
-
-  // Your compose maps host 5432 -> container 3306.
-  // Using 127.0.0.1 avoids occasional localhost/IPv6 issues.
+  database: dbName,
   connectTimeout: process.env.MARIADB_CONNECT_TIMEOUT ? Number(process.env.MARIADB_CONNECT_TIMEOUT) : 5000,
-  // MariaDB can be strict; explicitly disable TLS unless you configure it.
   ssl: process.env.MARIADB_SSL ? JSON.parse(process.env.MARIADB_SSL) : false,
-
-  // IMPORTANT: don't hard-fail on pool creation if DB doesn't exist yet.
-  // We'll switch to `central` after connecting.
-  database: undefined,
-
   waitForConnections: true,
   connectionLimit: 20,
   queueLimit: 0,
@@ -44,25 +37,14 @@ const pointsMysql = mysql.createPool({
 // ============== DATABASE INITIALIZATION ==============
 
 async function initializeDatabase() {
-  // With your MariaDB init (`central-db.sql`) tables are created at container boot.
-  // Keep a lightweight runtime check so the service fails fast if the schema isn't present.
   try {
-    // Don't require a pre-selected database for connectivity.
-    await pointsMysql.query('SELECT 1');
-
-    const dbName = process.env.MARIADB_DB || 'central';
-    // Make sure the schema exists and select it.
-
-    // Note: the container init may create the DB slightly later than the Node start.
-
-    // If it doesn't exist yet (first boot race), wait until it appears.
     const maxAttempts = Number(process.env.MARIADB_DB_WAIT_ATTEMPTS || 10);
     const attemptDelayMs = Number(process.env.MARIADB_DB_WAIT_DELAY_MS || 1000);
 
     let lastErr;
     for (let attempt = 1; attempt <= maxAttempts; attempt++) {
       try {
-        await pointsMysql.query(`USE \`${dbName}\``);
+        await pointsMysql.query('SELECT 1');
         console.log(`✓ MariaDB connection ok (using database: ${dbName})`);
         lastErr = null;
         break;
@@ -76,10 +58,6 @@ async function initializeDatabase() {
     if (lastErr) {
       throw lastErr;
     }
-
-
-
-
   } catch (err) {
     console.error('✗ Database initialization error:', err.message);
     throw err;
@@ -88,35 +66,10 @@ async function initializeDatabase() {
 
 initializeDatabase();
 
-
 // ============== PROVIDER MAPPING ==============
 
-const PROVIDER_CONFIG = {
-  redPlug: {
-    base: process.env.REDPLUG_BASE_URL || 'https://api.redplug.local',
-    endpoints: {
-      list: '/points',
-      detail: '/point/{pointid}',
-      status: '/point/{pointid}/status'
-    }
-  },
-  greenPlug: {
-    base: process.env.GREENPLUG_BASE_URL || 'https://api.greenplug.local',
-    endpoints: {
-      list: '/chargingPoints',
-      detail: '/chargingPoints/{pointid}',
-      status: '/chargingPoints/{pointid}/status'
-    }
-  },
-  bluePlug: {
-    base: process.env.BLUEPLUG_BASE_URL || 'https://api.blueplug.local',
-    endpoints: {
-      list: '/locations',
-      detail: '/location/{pointid}',
-      status: '/location/{pointid}/status'
-    }
-  }
-};
+const { PROVIDER_MAP } = require('./plugs_api');
+const { buildProviderUrl } = require('./plugs_api');
 
 // ============== HELPER FUNCTIONS ==============
 
@@ -124,37 +77,44 @@ const PROVIDER_CONFIG = {
  * Normalize point data from different providers
  */
 function normalizePoint(rawPoint, provider) {
-  const mapping = {
-    redPlug: {
-      id: rawPoint.pointid,
-      name: rawPoint.name,
-      lat: rawPoint.lat,
-      lon: rawPoint.lon,
-      capacity: rawPoint.cap,
-      price: rawPoint.kwhprice,
-      status: rawPoint.status
-    },
-    greenPlug: {
-      id: rawPoint.id || rawPoint.pointid,
-      name: rawPoint.name,
-      lat: rawPoint.latitude,
-      lon: rawPoint.longitude,
-      capacity: rawPoint.capacity,
-      price: rawPoint.price_per_kwh,
-      status: rawPoint.status
-    },
-    bluePlug: {
-      id: rawPoint.id,
-      name: rawPoint.location_name,
-      lat: rawPoint.latitude,
-      lon: rawPoint.longitude,
-      capacity: rawPoint.kwh_capacity,
-      price: rawPoint.kwh_price,
-      status: rawPoint.availability
-    }
-  };
+  const p = rawPoint || {};
 
-  return mapping[provider];
+  if (provider === 'redPlug') {
+    return {
+      id: p.pointid,
+      name: p.providerName,
+      lat: p.lat,
+      lon: p.long,
+      capacity: p.cap,
+      status: p.status,
+    };
+  }
+
+  if (provider === 'greenPlug') {
+    return {
+      id: p.id,
+      name: p.providerName,
+      lat: p.coords?.lat,
+      lon: p.coords?.long,
+      capacity: p.cap,
+      price: p.kwhRateEur,
+      status: p.state,
+    };
+  }
+
+  if (provider === 'bluePlug') {
+    return {
+      id: p.chargerId,
+      name: p.providerName,
+      lat: p.geo?.[0],
+      lon: p.geo?.[1],
+      capacity: p.cap,
+      price: p.pricePerKwh,
+      status: p.currentStatus,
+    };
+  }
+
+  throw new Error(`normalizePoint: unknown provider '${provider}'`);
 }
 
 /**
@@ -162,15 +122,19 @@ function normalizePoint(rawPoint, provider) {
  */
 async function fetchFromProvider(provider) {
   try {
-    const config = PROVIDER_CONFIG[provider];
-    const url = `${config.base}${config.endpoints.list}`;
+    const config = PROVIDER_MAP[provider];
+    if (!config) throw new Error(`Unknown provider: ${provider}`);
+
+    const base = process.env[config.baseUrlEnv] || config.baseUrlDefault;
+    const url = `${base}${config.listPath}`;
 
     console.log(`📡 Fetching from ${provider}: ${url}`);
-    
+
     const response = await axios.get(url, {
       timeout: 10000,
       headers: { 'Accept': 'application/json' }
     });
+
 
     const points = Array.isArray(response.data) ? response.data : response.data.points || [];
     console.log(`✓ Fetched ${points.length} points from ${provider}`);
@@ -197,30 +161,38 @@ async function syncProviderPoints(provider) {
 
     for (const rawPoint of points) {
       const normalized = normalizePoint(rawPoint, provider);
-      
-      const result = await client.query(
-        `INSERT INTO charging_points 
-         (provider, external_id, name, latitude, longitude, capacity_kw, price_per_kwh, status, raw_data)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
-         ON CONFLICT (external_id) DO UPDATE SET
-         name = $3, latitude = $4, longitude = $5, capacity_kw = $6, 
-         price_per_kwh = $7, status = $8, updated_at = CURRENT_TIMESTAMP, raw_data = $9
-         RETURNING id, xmax`,
-        [
-          provider,
-          normalized.id,
-          normalized.name,
-          normalized.lat,
-          normalized.lon,
-          normalized.capacity,
-          normalized.price,
-          normalized.status,
-          JSON.stringify(rawPoint)
-        ]
-      );
 
-      if (result.rows[0].xmax === 0) newCount++;
-      else updatedCount++;
+      await client.query(
+          `INSERT INTO points 
+           (id, point_id, provider_name, lon, lat, status, capacity_kw, kwh_price, location_name)
+           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+           ON DUPLICATE KEY UPDATE
+           status = VALUES(status),
+           capacity_kw = VALUES(capacity_kw),
+           kwh_price = VALUES(kwh_price),
+           lon = VALUES(lon),
+           lat = VALUES(lat),
+           location_name = VALUES(location_name),
+           last_updated = CURRENT_TIMESTAMP
+           `,
+          [
+            uuidv4(),
+            normalized.id,
+            provider,
+            normalized.lon,
+            normalized.lat,
+            normalized.status,
+            normalized.capacity,
+            normalized.price,
+            normalized.name,
+          ]
+        );
+
+      if (newCount !== undefined) {
+        newCount++;
+      } else {
+        updatedCount++;
+      }
     }
 
     const duration = Date.now() - startTime;
@@ -281,34 +253,234 @@ async function publishEvent(eventType, data) {
 
 // ============== REST ENDPOINTS ==============
 
+// ---- plugApi ----
+
+/**
+ * GET /plugApi/points
+ * Debug endpoint: returns this service plug, listPath url template and logs the JSON
+ */
+app.get('/plugApi/points', async (req, res) => {
+  try {
+    const service = process.env.SERVICE;
+
+    if (!service) {
+      throw new Error(
+        "Missing process.env.SERVICE. Provide a plug name (red/green/blue) so this endpoint can compute the provider URL. Examples: redPlug, greenPlug, bluePlug"
+      );
+    }
+
+    const s = String(service).toLowerCase();
+
+    let plugKey;
+    if (s.includes('green')) plugKey = 'greenPlug';
+    else if (s.includes('red')) plugKey = 'redPlug';
+    else if (s.includes('blue')) plugKey = 'bluePlug';
+    else if (s.includes('central')) {
+      throw new Error(
+        `process.env.SERVICE='${service}' looks like a central service. Please set process.env.SERVICE to a specific plug: redPlug | greenPlug | bluePlug`
+      );
+    } else {
+      throw new Error(
+        `Invalid process.env.SERVICE='${service}'. Expected a plug identifier containing one of: red, green, blue (e.g. redPlug | greenPlug | bluePlug)`
+      );
+    }
+
+    const url = buildProviderUrl(plugKey, 'listPath', '');
+
+    const bearerToken = process.env.BEARER_TOKEN;
+
+    const requestHeaders = { Accept: 'application/json' };
+    if (bearerToken) {
+      requestHeaders.Authorization = `Bearer ${bearerToken}`;
+    }
+
+    const providerResp = await axios.get(url, {
+      timeout: 10000,
+      headers: requestHeaders,
+    });
+
+    const payload = {
+      service,
+      plugKey,
+      url,
+      data: providerResp.data,
+    };
+
+    console.log('[/db/points] provider json:', payload);
+    return res.json(payload);
+
+  } catch (err) {
+    console.error('Error in /db/points:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ---- db ----
+
+/**
+ * POST /db/populate
+ * Fetch all points from the selected plug API and insert them into MariaDB.
+ * Body (optional): { provider?: 'redPlug'|'greenPlug'|'bluePlug' }
+ */
+app.post('/db/repopulate', async (req, res) => {
+  try {
+    const service = process.env.SERVICE;
+    if (!service) {
+      throw new Error(
+        "Missing process.env.SERVICE. Provide a plug name (red/green/blue) so this endpoint can populate the DB. Examples: redPlug, greenPlug, bluePlug"
+      );
+    }
+
+    const s = String(service).toLowerCase();
+
+    let plugKey;
+    if (s.includes('green')) plugKey = 'greenPlug';
+    else if (s.includes('red')) plugKey = 'redPlug';
+    else if (s.includes('blue')) plugKey = 'bluePlug';
+    else if (s.includes('central')) {
+      throw new Error(
+        `process.env.SERVICE='${service}' looks like a central service. Please set process.env.SERVICE to a specific plug: redPlug | greenPlug | bluePlug`
+      );
+    } else {
+      throw new Error(
+        `Invalid process.env.SERVICE='${service}'. Expected a plug identifier containing one of: red, green, blue (e.g. redPlug | greenPlug | bluePlug)`
+      );
+    }
+
+    const url = buildProviderUrl(plugKey, 'listPath', '');
+
+    const bearerToken = process.env.BEARER_TOKEN || process.env.AUTH_TOKEN || process.env.TOKEN;
+    const headers = { Accept: 'application/json' };
+    if (bearerToken) headers.Authorization = `Bearer ${bearerToken}`;
+
+    const providerResp = await axios.get(url, { timeout: 10000, headers });
+
+    const rawPoints = Array.isArray(providerResp.data)
+      ? providerResp.data
+      : providerResp.data.points || providerResp.data;
+
+    if (!Array.isArray(rawPoints)) {
+      throw new Error('Provider response did not contain an array of points');
+    }
+
+    const client = await pointsMysql.getConnection();
+    try {
+      await client.beginTransaction();
+
+      // Empty the table first (full repopulate)
+      await client.query('DELETE FROM points');
+
+      let newCount = 0;
+      let updatedCount = 0;
+
+      for (const rawPoint of rawPoints) {
+        const normalized = normalizePoint(rawPoint, plugKey);
+
+        await client.query(
+          `INSERT INTO points
+           (id, point_id, provider_name, lon, lat, status, capacity_kw, kwh_price, location_name)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+           ON DUPLICATE KEY UPDATE
+           status = VALUES(status),
+           capacity_kw = VALUES(capacity_kw),
+           kwh_price = VALUES(kwh_price),
+           lon = VALUES(lon),
+           lat = VALUES(lat),
+           location_name = VALUES(location_name),
+           last_updated = CURRENT_TIMESTAMP`,
+          [
+            uuidv4(),
+            normalized.id,
+            plugKey,
+            normalized.lon,
+            normalized.lat,
+            normalized.status,
+            normalized.capacity,
+            normalized.price,
+            normalized.name,
+          ]
+        );
+
+        newCount++;
+      }
+
+      //await client.query(
+      //  `INSERT INTO points_sync_log 
+      //   (provider, total_points, new_points, updated_points, duration_ms, status)
+      //   VALUES ($1, $2, $3, $4, $5, $6)`,
+      //  [plugKey, rawPoints.length, newCount, updatedCount, 0, 'success']
+      //);
+
+      await client.query('COMMIT');
+
+      const payload = {
+        service,
+        plugKey,
+        url,
+        fetched: rawPoints.length,
+        newCount,
+        updatedCount,
+      };
+
+      console.log('[/db/populate]', payload);
+      return res.json(payload);
+    } catch (dbErr) {
+      await client.query('ROLLBACK');
+      throw dbErr;
+    } finally {
+      client.release();
+    }
+  } catch (err) {
+    console.error('Error in /db/populate:', err.message);
+    return res.status(500).json({ error: err.message });
+  }
+});
+
+
+// ---- api ----
+
 /**
  * GET /api/points
  * Get all points with optional filters
  */
 app.get('/api/points', async (req, res) => {
-  try {
-    const { provider, status, lat, lon, radius } = req.query;
 
-    let query = 'SELECT * FROM charging_points WHERE 1=1';
+  try {
+    const { provider, status, lat, lon, radius, limit } = req.query;
+    const safeLimit = limit !== undefined ? Number(limit) : undefined;
+
+    let query = 'SELECT * FROM points WHERE 1=1';
     const params = [];
 
     if (provider) {
-      query += ' AND provider = $' + (params.length + 1);
+      // central schema uses provider_name
+      query += ' AND provider_name = ?';
       params.push(provider);
     }
 
     if (status) {
-      query += ' AND status = $' + (params.length + 1);
+      query += ' AND status = ?';
       params.push(status);
     }
 
     if (lat && lon && radius) {
-      // Distance query using PostGIS
-      query += ' AND earth_distance(ll_to_earth($' + (params.length + 1) + ', $' + (params.length + 2) + '), ll_to_earth(latitude, longitude)) < $' + (params.length + 3);
-      params.push(lat, lon, radius * 1000); // Convert km to meters
+      // Keep simple bounding approximation if radius is provided (central schema has no PostGIS).
+      // radius is assumed in km.
+      const km = Number(radius);
+      const latDelta = km / 111; // ~111km per degree latitude
+      const lonDelta = km / (111 * Math.cos(Number(lat) * Math.PI / 180));
+
+      query += ' AND lat BETWEEN ? AND ?';
+      params.push(Number(lat) - latDelta, Number(lat) + latDelta);
+
+      query += ' AND lon BETWEEN ? AND ?';
+      params.push(Number(lon) - lonDelta, Number(lon) + lonDelta);
     }
 
-query += ' LIMIT 100';
+    if (safeLimit !== undefined && Number.isFinite(safeLimit)) {
+      query += ' LIMIT ?';
+      params.push(safeLimit);
+    }
 
     const [rows] = await pointsMysql.query(query, params);
 
@@ -422,11 +594,11 @@ app.get('/api/points/sync/log', async (req, res) => {
     const params = [];
 
     if (provider) {
-      query += ' WHERE provider = $1';
+      query += ' WHERE provider = ?';
       params.push(provider);
     }
 
-    query += ' ORDER BY synced_at DESC LIMIT $' + (params.length + 1);
+    query += ' ORDER BY synced_at DESC LIMIT ?';
     params.push(parseInt(limit));
 
     const result = await pointsMysql.query(query, params);
@@ -512,7 +684,7 @@ app.get('/health', async (req, res) => {
   } catch (err) {
     res.status(503).json({
       status: 'error',
-      service: 'points-service',
+      service: process.env.SERVICE || 'points-service',
       database: 'disconnected',
       error: err.message
     });
@@ -524,8 +696,8 @@ app.get('/health', async (req, res) => {
 const PORT = process.env.PORT || 3001;
 
 const server = app.listen(PORT, () => {
-  console.log(`✓ Points Service running on port ${PORT}`);
-  console.log(`✓ MariaDB: ${process.env.MARIADB_HOST || 'localhost'}:${process.env.MARIADB_PORT || 5432}/${process.env.MARIADB_DB || '(no db selected)'}`);
+  console.log(`✓ Points Service ${process.env.SERVICE || 'points-service'} running on port ${PORT}`);
+  console.log(`✓ MariaDB: ${process.env.MARIADB_HOST || 'localhost'}:${process.env.MARIADB_PORT || 5432}/${dbName}`);
 });
 
 // Graceful shutdown
