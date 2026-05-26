@@ -8,11 +8,8 @@ COPY package*.json ./
 # Install dependencies
 RUN npm install --omit=dev
 
-# Copy source
+# Copy source (repo build context is already Points_Service/ when built via docker-compose)
 COPY . .
-
-# Expose port
-EXPOSE 3001
 
 # Healthcheck
 HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
