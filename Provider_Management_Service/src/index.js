@@ -17,6 +17,7 @@ const DB_PORT = Number(process.env.DB_PORT || 3306);
 const DB_USER = process.env.DB_USER || 'provider_user';
 const DB_PASSWORD = process.env.DB_PASSWORD || 'provider_pass';
 const DB_NAME = process.env.DB_NAME || 'provider_db';
+const MESSAGE_BROKER_URL = process.env.MESSAGE_BROKER_URL || 'http://localhost:3003';
 
 const pool = mysql.createPool({
   host: DB_HOST,
@@ -71,7 +72,23 @@ function mapRequestToProviderPayload(body) {
 
 function validateCreatePayload(payload) {
   const required = ['company_name', 'password_hash', 'TIN', 'email', 'API_endpoint', 'API_key'];
-  return required.filter((field) => payload[field] === undefined || payload[field] === null || payload[field] === '');
+  const missing = required.filter((field) => payload[field] === undefined || payload[field] === null || payload[field] === '');
+  const formatErrors = [];
+
+  // Email format check
+  if (payload.email && !/^\S+@\S+\.\S+$/.test(payload.email)) {
+    formatErrors.push('email');
+  }
+  // API_endpoint URL format check (simple)
+  try {
+    if (payload.API_endpoint) {
+      new URL(payload.API_endpoint);
+    }
+  } catch (e) {
+    formatErrors.push('API_endpoint');
+  }
+
+  return { missing, formatErrors };
 }
 
 function normalizeProvider(row) {
@@ -104,33 +121,79 @@ async function getProviderById(providerId) {
   return normalizeProvider(rows[0]);
 }
 
-app.post('/providers/register', verifyAuth, async (req, res) => {
+
+// Νέο endpoint: /providers/signup (secured, validation, broker event)
+const axios = require('axios');
+
+app.post('/providers/signup', async (req, res) => {
   try {
     const payload = mapRequestToProviderPayload(req.body);
-    const missing = validateCreatePayload(payload);
+    const { missing, formatErrors } = validateCreatePayload(payload);
 
-    if (missing.length) {
+    if (missing.length || formatErrors.length) {
       return res.status(400).json({
-        error: 'Missing required fields',
-        missing
+        error: missing.length ? 'Missing required fields' : 'Invalid field format',
+        missing,
+        formatErrors
       });
     }
 
-    const [result] = await pool.query(
-      `INSERT INTO Provider (company_name, password_hash, TIN, email, contact_number, API_endpoint, API_key)
-       VALUES (?, ?, ?, ?, ?, ?, ?)`,
-      [
-        payload.company_name,
-        payload.password_hash,
-        payload.TIN,
-        payload.email,
-        payload.contact_number,
-        payload.API_endpoint,
-        payload.API_key
-      ]
-    );
+    // Εισαγωγή provider
+    let result, provider;
+    try {
+      [result] = await pool.query(
+        `INSERT INTO Provider (company_name, password_hash, TIN, email, contact_number, API_endpoint, API_key)
+         VALUES (?, ?, ?, ?, ?, ?, ?)`,
+        [
+          payload.company_name,
+          payload.password_hash,
+          payload.TIN,
+          payload.email,
+          payload.contact_number,
+          payload.API_endpoint,
+          payload.API_key
+        ]
+      );
+      provider = await getProviderById(result.insertId);
+    } catch (err) {
+      // Έλεγχος για duplicate entry
+      if (err.code === 'ER_DUP_ENTRY' && err.message) {
+        let conflictField = 'unknown';
+        if (err.message.includes('uq_provider_company_name')) conflictField = 'company_name';
+        else if (err.message.includes('uq_provider_tin')) conflictField = 'TIN';
+        else if (err.message.includes('uq_provider_email')) conflictField = 'email';
+        return res.status(409).json({
+          error: 'Duplicate provider',
+          conflictField
+        });
+      }
+      // Άλλο DB error
+      return res.status(500).json({
+        error: 'Provider registration failed',
+        message: err.message
+      });
+    }
 
-    const provider = await getProviderById(result.insertId);
+    // Αποστολή canonical event στον message broker
+    try {
+      await axios.post(`${MESSAGE_BROKER_URL}/api/events/publish`, {
+        eventType: 'provider.registered',
+        data: {
+          providerId: provider.provider_id,
+          companyName: provider.company_name,
+          TIN: provider.TIN,
+          email: provider.email,
+          apiEndpoint: provider.API_endpoint,
+          apiKey: provider.API_key,
+          contactNumber: provider.contact_number,
+          createdAt: provider.created_at
+        },
+        sourceService: 'provider-management-service'
+      }, { timeout: 5000 });
+    } catch (err) {
+      // Δεν μπλοκάρει το registration αν αποτύχει το event
+      console.error('⚠️ Failed to publish provider.registered event:', err.message);
+    }
 
     return res.status(201).json({
       message: 'Provider registered successfully',

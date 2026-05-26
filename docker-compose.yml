@@ -366,8 +366,11 @@ services:
       DB_USER: provider_user
       DB_PASSWORD: provider_pass
       DB_NAME: provider_db
+      MESSAGE_BROKER_URL: http://message-broker:3003
     depends_on:
       mariadb-provider:
+        condition: service_healthy
+      message-broker:
         condition: service_healthy
     networks:
       - saasplug-network
