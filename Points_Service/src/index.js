@@ -455,11 +455,17 @@ const { pointId } = req.params;
       const minutesInt = parseInt(minutesNum);
       if (!Number.isNaN(minutesNum)) {
         if (provider === 'bluePlug') {
-          reserveBody = { minutes: minutesInt };
+          reserveUrl += `?minutes=${minutesInt}`;
+          console.log(`Built reserveUrl for bluePlug with duration as query param: ${reserveUrl}`);
         }else if (provider === 'redPlug') {
           // redPlug supports duration in the URL path, so we can skip it in the body.
           reserveUrl = buildProviderUrl(provider, "reservePathWduration", `${pointId},${minutesInt}`);
           console.log(`Built reserveUrl for redPlug with duration in path: ${reserveUrl}`);
+        }else if (provider === 'greenPlug') {
+          reserveBody = { duration: minutesInt };
+          console.log(`Built reserveBody for greenPlug with duration in body:`, reserveBody," and reserveUrl: ", reserveUrl);
+        }else{
+          throw new Error(`Provider ${provider} must be one of redPlug, greenPlug, bluePlug for duration handling`);
         }
       }
     }
