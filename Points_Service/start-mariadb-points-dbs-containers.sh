@@ -34,15 +34,24 @@ echo "free ports found: ${free_ports[@]}"
 
 # Allow overrides from environment; otherwise use defaults.
 # Use 4 continuous available host ports for: red/green/blue/central.
-: "${points_db_red_port:=${free_ports[0]}}"
-: "${points_db_green_port:=${free_ports[1]}}"
-: "${points_db_blue_port:=${free_ports[2]}}"
-: "${points_db_central_port:=${free_ports[3]}}"
+points_db_red_port=${points_db_red_port:-${free_ports[0]}}
+points_db_green_port=${points_db_green_port:-${free_ports[1]}}
+points_db_blue_port=${points_db_blue_port:-${free_ports[2]}}
+points_db_central_port=${points_db_central_port:-${free_ports[3]}}
 
 export points_db_red_port
 export points_db_green_port
 export points_db_blue_port
 export points_db_central_port
+
+# Debug: Print the variables to verify they are set
+echo " points_db_red_port: $points_db_red_port"
+echo " points_db_green_port: $points_db_green_port"
+echo " points_db_blue_port: $points_db_blue_port"
+echo " points_db_central_port: $points_db_central_port"
+
+
+docker build --no-cache -t points_service:latest .
 
 docker compose -f docker-compose.mariadb.points.yml up -d
 

@@ -19,7 +19,8 @@ const PROVIDER_MAP = {
     baseUrlDefault: 'https://davinci.softlab.ntua.gr/saas26/bluePlug/api',
     listPath: '/locations',
     detailPath: '/location/${pointId}',
-    statusPath: '/location/${pointId}/status',
+    reservePath: '/location/${pointId}/hold',
+    statusPath: '/location/${pointId}/status'
   },
 };
 

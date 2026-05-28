@@ -82,173 +82,52 @@ function normalizePoint(rawPoint, provider) {
   if (provider === 'redPlug') {
     return {
       id: p.pointid,
-      name: p.providerName,
+      provider_name: p.providerName,
       lat: p.lat,
       lon: p.long,
       capacity: p.cap,
       status: p.status,
+      location_name: p.locationName,
+      connector: p.connector,
+      address: p.address,
+      reservation_end_time: p.reservationendtime,
+      price: null
     };
   }
 
   if (provider === 'greenPlug') {
     return {
       id: p.id,
-      name: p.providerName,
+      provider_name: p.providerName,
       lat: p.coords?.lat,
       lon: p.coords?.long,
       capacity: p.cap,
       price: p.kwhRateEur,
       status: p.state,
+      connector: p.connectorType,
+      location_name: p.locationName,
+      address: p.address,
+      reservation_end_time: p.reservedUntil
     };
   }
 
   if (provider === 'bluePlug') {
     return {
       id: p.chargerId,
-      name: p.providerName,
+      provider_name: p.providerName,
       lat: p.geo?.[0],
       lon: p.geo?.[1],
       capacity: p.cap,
       price: p.pricePerKwh,
       status: p.currentStatus,
+      location_name: p.locationName,
+      connector: p.connector,
+      address: p.address,
+      reservation_end_time: p.reservationEnd
     };
   }
 
   throw new Error(`normalizePoint: unknown provider '${provider}'`);
-}
-
-/**
- * Fetch points from provider API
- */
-async function fetchFromProvider(provider) {
-  try {
-    const config = PROVIDER_MAP[provider];
-    if (!config) throw new Error(`Unknown provider: ${provider}`);
-
-    const base = process.env[config.baseUrlEnv] || config.baseUrlDefault;
-    const url = `${base}${config.listPath}`;
-
-    console.log(`📡 Fetching from ${provider}: ${url}`);
-
-    const response = await axios.get(url, {
-      timeout: 10000,
-      headers: { 'Accept': 'application/json' }
-    });
-
-
-    const points = Array.isArray(response.data) ? response.data : response.data.points || [];
-    console.log(`✓ Fetched ${points.length} points from ${provider}`);
-
-    return points;
-  } catch (err) {
-    console.error(`✗ Error fetching from ${provider}:`, err.message);
-    throw err;
-  }
-}
-
-/**
- * Sync points from provider to database
- */
-async function syncProviderPoints(provider) {
-  const client = await pointsMysql.getConnection();
-  try {
-    await client.beginTransaction();
-
-    const startTime = Date.now();
-    const points = await fetchFromProvider(provider);
-    
-    let newCount = 0, updatedCount = 0;
-
-    for (const rawPoint of points) {
-      const normalized = normalizePoint(rawPoint, provider);
-
-      await client.query(
-          `INSERT INTO points 
-           (id, point_id, provider_name, lon, lat, status, capacity_kw, kwh_price, location_name)
-           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
-           ON DUPLICATE KEY UPDATE
-           status = VALUES(status),
-           capacity_kw = VALUES(capacity_kw),
-           kwh_price = VALUES(kwh_price),
-           lon = VALUES(lon),
-           lat = VALUES(lat),
-           location_name = VALUES(location_name),
-           last_updated = CURRENT_TIMESTAMP
-           `,
-          [
-            uuidv4(),
-            normalized.id,
-            provider,
-            normalized.lon,
-            normalized.lat,
-            normalized.status,
-            normalized.capacity,
-            normalized.price,
-            normalized.name,
-          ]
-        );
-
-      if (newCount !== undefined) {
-        newCount++;
-      } else {
-        updatedCount++;
-      }
-    }
-
-    const duration = Date.now() - startTime;
-
-    // Log sync
-    await client.query(
-      `INSERT INTO points_sync_log 
-       (provider, total_points, new_points, updated_points, duration_ms, status)
-       VALUES ($1, $2, $3, $4, $5, $6)`,
-      [provider, points.length, newCount, updatedCount, duration, 'success']
-    );
-
-    await client.query('COMMIT');
-
-    console.log(`✓ Synced ${provider}: ${newCount} new, ${updatedCount} updated in ${duration}ms`);
-
-    // Publish event
-    publishEvent('PointsSynced', {
-      provider,
-      totalPoints: points.length,
-      newPoints: newCount,
-      updatedPoints: updatedCount,
-      timestamp: new Date()
-    });
-
-    return { newCount, updatedCount, totalPoints: points.length };
-  } catch (err) {
-    await client.query('ROLLBACK');
-    
-    console.error(`✗ Sync error for ${provider}:`, err.message);
-
-    await client.query(
-      `INSERT INTO points_sync_log (provider, status, error_message)
-       VALUES ($1, $2, $3)`,
-      [provider, 'error', err.message]
-    );
-
-    throw err;
-  } finally {
-    client.release();
-  }
-}
-
-/**
- * Publish event to message broker
- */
-async function publishEvent(eventType, data) {
-  try {
-    const brokerUrl = process.env.MESSAGE_BROKER_URL || 'http://localhost:3003';
-    await axios.post(`${brokerUrl}/api/events/publish`, {
-      eventType,
-      data
-    }, { timeout: 5000 });
-  } catch (err) {
-    console.error('⚠️ Failed to publish event:', err.message);
-  }
 }
 
 // ============== REST ENDPOINTS ==============
@@ -376,39 +255,47 @@ app.post('/db/repopulate', async (req, res) => {
       for (const rawPoint of rawPoints) {
         const normalized = normalizePoint(rawPoint, plugKey);
 
-        await client.query(
-          `INSERT INTO points
-           (id, point_id, provider_name, lon, lat, status, capacity_kw, kwh_price, location_name)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-           ON DUPLICATE KEY UPDATE
-           status = VALUES(status),
-           capacity_kw = VALUES(capacity_kw),
-           kwh_price = VALUES(kwh_price),
-           lon = VALUES(lon),
-           lat = VALUES(lat),
-           location_name = VALUES(location_name),
-           last_updated = CURRENT_TIMESTAMP`,
-          [
-            uuidv4(),
-            normalized.id,
-            plugKey,
-            normalized.lon,
-            normalized.lat,
-            normalized.status,
-            normalized.capacity,
-            normalized.price,
-            normalized.name,
-          ]
-        );
+         await client.query(
+           `INSERT INTO points
+            (id, point_id, provider_name, lon, lat, status, capacity_kw, kwh_price, connector, location_name, address, reservation_end_time, last_updated, created_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ON DUPLICATE KEY UPDATE
+            status = VALUES(status),
+            capacity_kw = VALUES(capacity_kw),
+            kwh_price = VALUES(kwh_price),
+            lon = VALUES(lon),
+            lat = VALUES(lat),
+            connector = VALUES(connector),
+            location_name = VALUES(location_name),
+            address = VALUES(address),
+            reservation_end_time = VALUES(reservation_end_time),
+            last_updated = CURRENT_TIMESTAMP`,
+            [
+              uuidv4(),
+              normalized.id || null,
+              normalized.provider_name || null,
+              normalized.lon || null,
+              normalized.lat || null,
+              normalized.status || null,
+              normalized.capacity || null,
+              normalized.price || null,
+              normalized.connector || null,
+              normalized.location_name || null,
+              normalized.address || null,
+              normalized.reservation_end_time || null,
+              new Date(),
+              new Date(),
+           ]
+         );
 
         newCount++;
       }
 
       //await client.query(
-      //  `INSERT INTO points_sync_log 
-      //   (provider, total_points, new_points, updated_points, duration_ms, status)
-      //   VALUES ($1, $2, $3, $4, $5, $6)`,
-      //  [plugKey, rawPoints.length, newCount, updatedCount, 0, 'success']
+       //  `INSERT INTO points_sync_log 
+       //   (provider, total_points, new_points, updated_points, duration_ms, status)
+       //   VALUES (?, ?, ?, ?, ?, ?)`,
+       //  [plugKey, rawPoints.length, newCount, updatedCount, 0, 'success']
       //);
 
       await client.query('COMMIT');
@@ -503,16 +390,16 @@ app.get('/api/points/:pointId', async (req, res) => {
   try {
     const { pointId } = req.params;
 
-    const result = await pointsMysql.query(
-      'SELECT * FROM charging_points WHERE id = $1 OR external_id = $1',
+    const [rows] = await pointsMysql.query(
+      'SELECT * FROM points WHERE point_id = ?',
       [pointId]
     );
 
-    if (result.rows.length === 0) {
+    if (rows.length === 0) {
       return res.status(404).json({ error: 'Point not found' });
     }
 
-    res.json(result.rows[0]);
+    res.json(rows[0]);
   } catch (err) {
     console.error('Error fetching point:', err.message);
     res.status(500).json({ error: 'Failed to fetch point' });
@@ -520,150 +407,112 @@ app.get('/api/points/:pointId', async (req, res) => {
 });
 
 /**
- * GET /api/points/status/:status
- * Get points by status
+ * POST /api/points/:pointId/reserve
+ * Reserve a charging point via provider API and update DB status
  */
-app.get('/api/points/status/:status', async (req, res) => {
+app.post('/api/points/:pointId/reserve', async (req, res) => {
   try {
-    const { status } = req.params;
-    const validStatuses = ['available', 'reserved', 'offline', 'maintenance'];
+const { pointId } = req.params;
 
-    if (!validStatuses.includes(status)) {
-      return res.status(400).json({ error: 'Invalid status' });
-    }
+    // Client sends { duration: <minutes> } (per requirement: request JSON has `minutes` key)
+    // Accept both `duration` and `minutes` for robustness.
+    const { duration, minutes } = req.body || {};
+    const reserveMinutes = duration ?? minutes;
 
-    const result = await pointsMysql.query(
-      'SELECT * FROM charging_points WHERE status = $1 LIMIT 100',
-      [status]
+    const [rows] = await pointsMysql.query(
+      'SELECT * FROM points WHERE point_id = ?',
+      [pointId]
     );
 
-    res.json({
-      status,
-      count: result.rows.length,
-      points: result.rows
-    });
-  } catch (err) {
-    console.error('Error fetching points by status:', err.message);
-    res.status(500).json({ error: 'Failed to fetch points' });
-  }
-});
-
-/**
- * POST /api/points/click
- * Track click on point
- */
-app.post('/api/points/click', async (req, res) => {
-  try {
-    const { pointId, userId, clickType } = req.body;
-
-    if (!['view', 'reserve_attempt', 'details'].includes(clickType)) {
-      return res.status(400).json({ error: 'Invalid click type' });
+    if (rows.length === 0) {
+      return res.status(404).json({ error: 'Point not found' });
     }
 
-    const result = await pointsMysql.query(
-      `INSERT INTO points_clicks (point_id, user_id, click_type)
-       VALUES ($1, $2, $3)
-       RETURNING *`,
-      [pointId, userId, clickType]
-    );
+    const point = rows[0];
+    const provider = point.provider_name;
+    const config = PROVIDER_MAP[provider];
 
-    // Publish click event
-    publishEvent('PointClicked', {
-      pointId,
-      userId,
-      clickType,
-      timestamp: new Date()
-    });
-
-    res.status(201).json(result.rows[0]);
-  } catch (err) {
-    console.error('Error recording click:', err.message);
-    res.status(500).json({ error: 'Failed to record click' });
-  }
-});
-
-/**
- * GET /api/points/sync/log
- * Get sync history
- */
-app.get('/api/points/sync/log', async (req, res) => {
-  try {
-    const { provider, limit = 50 } = req.query;
-
-    let query = 'SELECT * FROM points_sync_log';
-    const params = [];
-
-    if (provider) {
-      query += ' WHERE provider = ?';
-      params.push(provider);
+    if (!config) {
+      return res.status(400).json({ error: `Unknown provider: ${provider}` });
     }
 
-    query += ' ORDER BY synced_at DESC LIMIT ?';
-    params.push(parseInt(limit));
+    let reserveUrl = buildProviderUrl(provider, "reservePath", pointId);
 
-    const result = await pointsMysql.query(query, params);
-
-    res.json({
-      logs: result.rows
-    });
-  } catch (err) {
-    console.error('Error fetching sync log:', err.message);
-    res.status(500).json({ error: 'Failed to fetch sync log' });
-  }
-});
-
-/**
- * POST /api/points/sync/:provider
- * Manually sync specific provider
- */
-app.post('/api/points/sync/:provider', async (req, res) => {
-  try {
-    const { provider } = req.params;
-    const validProviders = ['redPlug', 'greenPlug', 'bluePlug'];
-
-    if (!validProviders.includes(provider)) {
-      return res.status(400).json({ error: 'Invalid provider' });
+    const bearerToken = process.env.BEARER_TOKEN;
+    const headers = { 'Accept': 'application/json' };
+    if (bearerToken) {
+      headers.Authorization = `Bearer ${bearerToken}`;
     }
 
-    const result = await syncProviderPoints(provider);
-    
-    res.json({
-      message: `Synced ${provider}`,
-      ...result,
-      timestamp: new Date()
-    });
-  } catch (err) {
-    console.error('Sync error:', err.message);
-    res.status(500).json({ error: 'Sync failed', details: err.message });
-  }
-});
+    // Build provider-specific request body.
+    // Requirement from user: body uses `minutes` key in the request JSON.
+    // We'll use reserveMinutes to populate provider payload.
+    let reserveBody = {};
 
-/**
- * POST /api/points/sync/all
- * Sync all providers
- */
-app.post('/api/points/sync/all', async (req, res) => {
-  try {
-    const results = {};
-
-    for (const provider of ['redPlug', 'greenPlug', 'bluePlug']) {
-      try {
-        results[provider] = await syncProviderPoints(provider);
-      } catch (err) {
-        results[provider] = { error: err.message };
+    if (reserveMinutes !== undefined && reserveMinutes !== null) {
+      // Normalize minutes to a number if possible
+      const minutesNum = Number(reserveMinutes);
+      const minutesInt = parseInt(minutesNum);
+      if (!Number.isNaN(minutesNum)) {
+        if (provider === 'bluePlug') {
+          reserveBody = { minutes: minutesInt };
+        }else if (provider === 'redPlug') {
+          // redPlug supports duration in the URL path, so we can skip it in the body.
+          reserveUrl = buildProviderUrl(provider, "reservePathWduration", `${pointId},${minutesInt}`);
+          console.log(`Built reserveUrl for redPlug with duration in path: ${reserveUrl}`);
+        }
       }
     }
 
+    console.log(`📡 Reserving point ${pointId} via ${provider}: POST ${reserveUrl}`, reserveBody);
+    const reserveResp = await axios.post(reserveUrl, reserveBody, {
+      timeout: 10000,
+      headers
+    });
+
+    const reserveData = reserveResp.data || {};
+    const normalizedResp = normalizePoint(reserveData, provider);
+
+    const newStatus = normalizedResp.status;
+    const reservationEndTime = normalizedResp.reservation_end_time;
+
+
+
+    if (newStatus !== 'held' && newStatus !== 'reserved') {
+      return res.status(400).json({
+        error: 'Reservation failed: Expecting provider to return status "held" or "reserved" after reservation attempt',
+        status: newStatus,
+        details: reserveData
+      });
+    }
+
+    try {
+      // Single UPDATE statement => atomic: either the whole row is updated or none.
+      await pointsMysql.query(
+        'UPDATE points SET status = ?, reservation_end_time = ?, last_updated = CURRENT_TIMESTAMP WHERE point_id = ?',
+        [newStatus, reservationEndTime || null, pointId]
+      );
+    } catch (dbErr) {
+      // If DB fails, do not mask the provider reservation result; return error to caller.
+      throw dbErr;
+    }
+
+    console.log(`✓ Point ${pointId} reserved successfully, status updated to ${newStatus}`);
+
     res.json({
-      message: 'Synced all providers',
-      results,
-      timestamp: new Date()
+      pointId,
+      provider,
+      status: newStatus,
+      reservationEndTime: reservationEndTime,
+      timestamp: new Date(),
+      message: `Point ${pointId} reserved successfully via ${provider} both on provider api and DB`
     });
   } catch (err) {
-    console.error('Sync all error:', err.message);
-    res.status(500).json({ error: 'Sync failed' });
+    console.error('Error reserving point:', err.message);
+    res.status(500).json({ error: 'Failed to reserve point', details: err.message });
   }
 });
+
 
 /**
  * GET /health
