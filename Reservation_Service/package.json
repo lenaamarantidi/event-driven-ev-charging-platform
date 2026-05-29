@@ -1,28 +1,26 @@
 {
   "name": "reservation-service",
   "version": "1.0.0",
-  "description": "Manages charging point reservations with billing integration",
+  "description": "EV Charging Point Reservation Service with Provider Adapters",
   "main": "src/index.js",
   "scripts": {
     "start": "node src/index.js",
     "dev": "nodemon src/index.js",
     "test": "jest"
   },
-  "keywords": [
-    "reservations",
-    "charging-points",
-    "billing",
-    "microservice"
-  ],
-  "author": "",
-  "license": "MIT",
   "dependencies": {
-    "axios": "^1.4.0",
     "express": "^4.18.2",
-    "pg": "^8.11.0",
-    "uuid": "^9.0.0"
+    "axios": "^1.4.0",
+    "uuid": "^9.0.0",
+    "dotenv": "^16.0.3",
+    "mysql2": "^3.6.0",
+    "amqplib": "^0.10.3"
   },
   "devDependencies": {
-    "nodemon": "^2.0.20"
-  }
+    "nodemon": "^2.0.20",
+    "jest": "^29.5.0"
+  },
+  "keywords": ["reservation", "ev-charging", "providers", "microservice"],
+  "author": "SaaS Plug",
+  "license": "MIT"
 }

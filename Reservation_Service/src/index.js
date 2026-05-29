@@ -1,102 +1,259 @@
 /**
- * Reservation Service
+ * Reservation Service (Port 3106)
  * 
- * Διαχειρίζει κρατήσεις σημείων φόρτισης
- * Αποθήκευση:
- * - Κρατήσεις χρήστη
- * - Ιστορικό κρατήσεων
- * - Δεσμευμένο χρόνο για κάθε σημείο
- * - Λογαριασμό τιμολόγησης ανά κράτηση
+ * Unified API for reserving EV charging points across multiple providers
+ * - redPlug, greenPlug, bluePlug
+ * 
+ * Publishes reservation_successful events to RabbitMQ for Billing & Analytics services
  */
 
 const express = require('express');
-const { Pool } = require('pg');
-const axios = require('axios');
+const dotenv = require('dotenv');
 const { v4: uuidv4 } = require('uuid');
+
+dotenv.config();
 
 const app = express();
 app.use(express.json());
 
-// ============== DATABASE CONFIGURATION ==============
-const pool = new Pool({
-  connectionString: process.env.RESERVATIONS_DB_URL || 'postgresql://postgres:password@localhost:5432/reservations_service',
-  max: 20,
-  idleTimeoutMillis: 30000,
-  connectionTimeoutMillis: 2000,
+// Import modules
+const { initializeDatabase, testDatabaseConnection } = require('./db');
+const { connectWithRetry, publishReservationEvent } = require('./rabbitmq');
+const { createReservation } = require('./controllers');
+
+const PORT = process.env.PORT || 3106;
+
+// ============== MIDDLEWARE ==============
+
+app.use((req, res, next) => {
+  console.log(`[${new Date().toISOString()}] ${req.method} ${req.path}`);
+  next();
 });
 
-// ============== DATABASE INITIALIZATION ==============
+// ============== ROUTES ==============
 
-async function initializeDatabase() {
-  const client = await pool.connect();
+/**
+ * Health Check
+ */
+app.get('/health', (req, res) => {
+  res.json({
+    status: 'healthy',
+    service: 'Reservation_Service',
+    port: PORT,
+    database: 'reservation_db',
+    timestamp: new Date().toISOString()
+  });
+});
+
+/**
+ * Unified Reservation API
+ * 
+ * Request:
+ * {
+ *   "providerName": "redPlug" | "greenPlug" | "bluePlug",
+ *   "pointId": "123",
+ *   "duration": 60,
+ *   "userId": "user-uuid" (optional, for tracking)
+ * }
+ * 
+ * Response:
+ * {
+ *   "success": true,
+ *   "reservationId": "uuid",
+ *   "providerId": 1,
+ *   "providerName": "redPlug",
+ *   "pointId": "123",
+ *   "reservationDetails": { ... provider response }
+ * }
+ */
+app.post('/api/reserve', async (req, res) => {
   try {
-    await client.query(`
-      CREATE TABLE IF NOT EXISTS reservations (
-        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-        user_id UUID NOT NULL,
-        point_id VARCHAR(255) NOT NULL,
-        provider VARCHAR(50) NOT NULL CHECK (provider IN ('redPlug', 'greenPlug', 'bluePlug')),
-        external_reservation_id VARCHAR(255),
-        status VARCHAR(50) DEFAULT 'pending' CHECK (status IN ('pending', 'confirmed', 'active', 'completed', 'cancelled')),
-        reserved_from TIMESTAMP NOT NULL,
-        reserved_until TIMESTAMP NOT NULL,
-        duration_minutes INTEGER,
-        requested_duration_minutes INTEGER,
-        estimated_kwh DECIMAL(10, 2),
-        estimated_cost DECIMAL(10, 2),
-        actual_kwh DECIMAL(10, 2),
-        actual_cost DECIMAL(10, 2),
-        payment_status VARCHAR(50) DEFAULT 'pending',
-        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-        started_at TIMESTAMP,
-        ended_at TIMESTAMP,
-        remarks TEXT
-      );
-      
-      CREATE INDEX IF NOT EXISTS idx_user_id ON reservations(user_id);
-      CREATE INDEX IF NOT EXISTS idx_point_id ON reservations(point_id);
-      CREATE INDEX IF NOT EXISTS idx_provider ON reservations(provider);
-      CREATE INDEX IF NOT EXISTS idx_status ON reservations(status);
-      CREATE INDEX IF NOT EXISTS idx_reserved_from ON reservations(reserved_from);
-      CREATE INDEX IF NOT EXISTS idx_payment_status ON reservations(payment_status);
-      
-      CREATE TABLE IF NOT EXISTS reservation_log (
-        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-        reservation_id UUID NOT NULL REFERENCES reservations(id) ON DELETE CASCADE,
-        event_type VARCHAR(100) NOT NULL,
-        status_before VARCHAR(50),
-        status_after VARCHAR(50),
-        details JSONB,
-        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-      );
-      
-      CREATE INDEX IF NOT EXISTS idx_log_reservation ON reservation_log(reservation_id);
-      CREATE INDEX IF NOT EXISTS idx_log_event ON reservation_log(event_type);
-      
-      CREATE TABLE IF NOT EXISTS reservation_statistics (
-        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-        date DATE NOT NULL,
-        provider VARCHAR(50) NOT NULL,
-        total_reservations INTEGER,
-        completed_reservations INTEGER,
-        cancelled_reservations INTEGER,
-        total_kwh DECIMAL(15, 2),
-        total_revenue DECIMAL(15, 2),
-        average_duration_minutes INTEGER,
-        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-      );
-      
-      CREATE UNIQUE INDEX IF NOT EXISTS idx_daily_stats ON reservation_statistics(date, provider);
+    const { providerName, pointId, duration, userId } = req.body;
+
+    // Validation
+    if (!providerName || !pointId || !duration) {
+      return res.status(400).json({
+        success: false,
+        error: 'Missing required fields: providerName, pointId, duration'
+      });
+    }
+
+    if (!['redPlug', 'greenPlug', 'bluePlug'].includes(providerName)) {
+      return res.status(400).json({
+        success: false,
+        error: 'Invalid provider. Must be redPlug, greenPlug, or bluePlug'
+      });
+    }
+
+    // Generate reservation ID
+    const reservationId = uuidv4();
+
+    console.log(`[RESERVE] Attempting reservation: ${reservationId} for ${providerName}#${pointId}`);
+
+    // Call controller
+    const result = await createReservation({
+      reservationId,
+      providerName,
+      pointId,
+      duration,
+      userId
+    });
+
+    if (!result.success) {
+      console.error(`[RESERVE] Failed: ${result.error}`);
+      return res.status(400).json(result);
+    }
+
+    console.log(`[RESERVE] Success: ${reservationId}`);
+
+    // Get provider ID for event publishing
+    let providerId = 1; // Default mapping
+    if (providerName === 'greenPlug') providerId = 2;
+    if (providerName === 'bluePlug') providerId = 3;
+
+    // Publish to RabbitMQ (async, non-blocking)
+    try {
+      await publishReservationEvent({
+        reservationId,
+        providerId,
+        providerName,
+        pointId,
+        duration,
+        timestamp: new Date().toISOString()
+      });
+      console.log(`[RABBITMQ] Event published for reservation ${reservationId}`);
+    } catch (rabbitmqError) {
+      console.error(`[RABBITMQ] Publishing error (non-blocking): ${rabbitmqError.message}`);
+      // Don't fail the reservation because of RabbitMQ error
+      // The event will be retried
+    }
+
+    // Return success response
+    res.status(200).json({
+      success: true,
+      reservationId,
+      providerId,
+      providerName,
+      pointId,
+      duration,
+      reservationDetails: result.data,
+      message: 'Reservation successful. Event published to billing & analytics services.'
+    });
+
+  } catch (error) {
+    console.error('[RESERVE] Unexpected error:', error.message);
+    res.status(500).json({
+      success: false,
+      error: error.message
+    });
+  }
+});
+
+/**
+ * Get Reservation History
+ */
+app.get('/api/reservations', async (req, res) => {
+  try {
+    const pool = require('./db').getPool();
+    const [rows] = await pool.query(`
+      SELECT 
+        reservation_id, provider_name, point_id, duration, status, 
+        created_at, reservation_details
+      FROM reservation_logs
+      ORDER BY created_at DESC
+      LIMIT 50
     `);
 
-    console.log('✓ Reservations database initialized successfully');
-  } catch (err) {
-    console.error('✗ Database initialization error:', err.message);
-  } finally {
-    client.release();
+    res.json({
+      success: true,
+      count: rows.length,
+      reservations: rows
+    });
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      error: error.message
+    });
+  }
+});
+
+/**
+ * Get Reservation Details
+ */
+app.get('/api/reservations/:reservationId', async (req, res) => {
+  try {
+    const { reservationId } = req.params;
+    const pool = require('./db').getPool();
+    const [rows] = await pool.query(
+      `SELECT * FROM reservation_logs WHERE reservation_id = ? LIMIT 1`,
+      [reservationId]
+    );
+
+    if (rows.length === 0) {
+      return res.status(404).json({
+        success: false,
+        error: 'Reservation not found'
+      });
+    }
+
+    res.json({
+      success: true,
+      reservation: rows[0]
+    });
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      error: error.message
+    });
+  }
+});
+
+// ============== SERVER STARTUP ==============
+
+async function startServer() {
+  try {
+    // Initialize database
+    await initializeDatabase();
+    await testDatabaseConnection();
+
+    // Connect to RabbitMQ
+    await connectWithRetry();
+
+    // Start Express server
+    app.listen(PORT, () => {
+      console.log(`\n✓ Reservation_Service started on http://localhost:${PORT}`);
+      console.log(`✓ Database: reservation_db`);
+      console.log(`✓ RabbitMQ: Connected`);
+      console.log(`\nEndpoints:`);
+      console.log(`  POST /api/reserve - Create reservation`);
+      console.log(`  GET  /api/reservations - List recent reservations`);
+      console.log(`  GET  /api/reservations/:id - Get reservation details`);
+      console.log(`  GET  /health - Health check`);
+    });
+  } catch (error) {
+    console.error('✗ Startup error:', error.message);
+    process.exit(1);
   }
 }
+
+// ============== GRACEFUL SHUTDOWN ==============
+
+process.on('SIGTERM', async () => {
+  console.log('\nSIGTERM received. Shutting down gracefully...');
+  const pool = require('./db').getPool();
+  if (pool) await pool.end();
+  process.exit(0);
+});
+
+process.on('SIGINT', async () => {
+  console.log('\nSIGINT received. Shutting down gracefully...');
+  const pool = require('./db').getPool();
+  if (pool) await pool.end();
+  process.exit(0);
+});
+
+// Start the server
+startServer();
 
 initializeDatabase();
 
