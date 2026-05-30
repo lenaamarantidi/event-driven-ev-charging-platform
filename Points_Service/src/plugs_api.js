@@ -153,7 +153,65 @@ function buildProviderUrl(plugKey, pathKey, pathArgs) {
   return `${baseUrl}${resolvedPath}`;
 }
 
+/**
+ * Normalize point data from different providers
+ */
+function normalizePoint(rawPoint, provider) {
+  const p = rawPoint || {};
+
+  if (provider === 'redPlug') {
+    return {
+      id: p.pointid,
+      provider_name: p.providerName,
+      lat: p.lat,
+      lon: p.long,
+      capacity: p.cap,
+      status: p.status,
+      location_name: p.locationName,
+      connector: p.connector,
+      address: p.address,
+      reservation_end_time: p.reservationendtime,
+      price: null
+    };
+  }
+
+  if (provider === 'greenPlug') {
+    return {
+      id: p.id,
+      provider_name: p.providerName,
+      lat: p.coords?.lat,
+      lon: p.coords?.long,
+      capacity: p.cap,
+      price: p.kwhRateEur,
+      status: p.state,
+      connector: p.connectorType,
+      location_name: p.locationName,
+      address: p.address,
+      reservation_end_time: p.reservedUntil
+    };
+  }
+
+  if (provider === 'bluePlug') {
+    return {
+      id: p.chargerId,
+      provider_name: p.providerName,
+      lat: p.geo?.[0],
+      lon: p.geo?.[1],
+      capacity: p.cap,
+      price: p.pricePerKwh,
+      status: p.currentStatus,
+      location_name: p.locationName,
+      connector: p.connector,
+      address: p.address,
+      reservation_end_time: p.reservationEnd
+    };
+  }
+
+  throw new Error(`normalizePoint: unknown provider '${provider}'`);
+}
+
 module.exports = {
   PROVIDER_MAP,
   buildProviderUrl,
+  normalizePoint
 };

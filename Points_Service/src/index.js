@@ -70,65 +70,21 @@ initializeDatabase();
 
 const { PROVIDER_MAP } = require('./plugs_api');
 const { buildProviderUrl } = require('./plugs_api');
+const { normalizePoint } = require('./plugs_api');
 
 // ============== HELPER FUNCTIONS ==============
+const { getAccessibleIps } = require('./util');
 
-/**
- * Normalize point data from different providers
- */
-function normalizePoint(rawPoint, provider) {
-  const p = rawPoint || {};
+// ============== REST ENDPOINTS CONST URLS ==============
 
-  if (provider === 'redPlug') {
-    return {
-      id: p.pointid,
-      provider_name: p.providerName,
-      lat: p.lat,
-      lon: p.long,
-      capacity: p.cap,
-      status: p.status,
-      location_name: p.locationName,
-      connector: p.connector,
-      address: p.address,
-      reservation_end_time: p.reservationendtime,
-      price: null
-    };
-  }
+const API_POINTS = '/api/points';
+const API_POINTS_BY_ID = '/api/points/:pointId';
+const API_POINTS_RESERVE = '/api/points/:pointId/reserve';
+const API_POINTS_RESERVE_MINUTES = '/api/points/:pointId/reserve/:minutes';
+const PLUGAPI_POINTS = '/plugApi/points';
 
-  if (provider === 'greenPlug') {
-    return {
-      id: p.id,
-      provider_name: p.providerName,
-      lat: p.coords?.lat,
-      lon: p.coords?.long,
-      capacity: p.cap,
-      price: p.kwhRateEur,
-      status: p.state,
-      connector: p.connectorType,
-      location_name: p.locationName,
-      address: p.address,
-      reservation_end_time: p.reservedUntil
-    };
-  }
-
-  if (provider === 'bluePlug') {
-    return {
-      id: p.chargerId,
-      provider_name: p.providerName,
-      lat: p.geo?.[0],
-      lon: p.geo?.[1],
-      capacity: p.cap,
-      price: p.pricePerKwh,
-      status: p.currentStatus,
-      location_name: p.locationName,
-      connector: p.connector,
-      address: p.address,
-      reservation_end_time: p.reservationEnd
-    };
-  }
-
-  throw new Error(`normalizePoint: unknown provider '${provider}'`);
-}
+const DB_REPOPULATE = '/db/repopulate';
+const HEALTH = '/health';
 
 // ============== REST ENDPOINTS ==============
 
@@ -138,7 +94,7 @@ function normalizePoint(rawPoint, provider) {
  * GET /plugApi/points
  * Debug endpoint: returns this service plug, listPath url template and logs the JSON
  */
-app.get('/plugApi/points', async (req, res) => {
+app.get(PLUGAPI_POINTS, async (req, res) => {
   try {
     const service = process.env.SERVICE;
 
@@ -201,7 +157,7 @@ app.get('/plugApi/points', async (req, res) => {
  * Fetch all points from the selected plug API and insert them into MariaDB.
  * Body (optional): { provider?: 'redPlug'|'greenPlug'|'bluePlug' }
  */
-app.post('/db/repopulate', async (req, res) => {
+app.post(DB_REPOPULATE, async (req, res) => {
   try {
     const service = process.env.SERVICE;
     if (!service) {
@@ -330,7 +286,7 @@ app.post('/db/repopulate', async (req, res) => {
  * GET /api/points
  * Get all points with optional filters
  */
-app.get('/api/points', async (req, res) => {
+app.get(API_POINTS, async (req, res) => {
 
   try {
     const { provider, status, lat, lon, radius, limit } = req.query;
@@ -386,7 +342,7 @@ app.get('/api/points', async (req, res) => {
  * GET /api/points/:pointId
  * Get specific point details
  */
-app.get('/api/points/:pointId', async (req, res) => {
+app.get(API_POINTS_BY_ID, async (req, res) => {
   try {
     const { pointId } = req.params;
 
@@ -410,7 +366,7 @@ app.get('/api/points/:pointId', async (req, res) => {
  * POST /api/points/:pointId/reserve
  * Reserve a charging point via provider API and update DB status
  */
-app.post('/api/points/:pointId/reserve', async (req, res) => {
+app.post(API_POINTS_RESERVE, async (req, res) => {
   try {
 const { pointId } = req.params;
 
@@ -519,12 +475,34 @@ const { pointId } = req.params;
   }
 });
 
+app.post(API_POINTS_RESERVE_MINUTES, async (req, res) => {
+  try {
+    const { pointId, minutes } = req.params;
+    
+    // Extract host:port
+    const protocol = req.protocol; // http or https
+    const host = req.get('host'); // e.g. localhost:3001
+
+    const url_repl = API_POINTS_RESERVE.replace(':pointId', pointId);
+    console.log(`Received reserve request with minutes. Original URL: ${req.originalUrl}, Reconstructed URL: ${url_repl} to send with body { minutes: ${minutes} }`);
+    const response = await axios.post(
+      `http://${host}${url_repl}`,
+      { minutes: Number(minutes) }
+    );
+
+    res.json(response.data);
+  } catch (err) {
+    console.error('Error in reserve with minutes:', err.message);
+    res.status(500).json({ error: 'Failed to reserve point', details: err.message });
+  }
+});
+
 
 /**
  * GET /health
  * Health check
  */
-app.get('/health', async (req, res) => {
+app.get(HEALTH, async (req, res) => {
   try {
     const result = await pointsMysql.query('SELECT 1');
 
@@ -551,8 +529,10 @@ app.get('/health', async (req, res) => {
 const PORT = process.env.PORT || 3001;
 
 const server = app.listen(PORT, () => {
-  console.log(`✓ Points Service ${process.env.SERVICE || 'points-service'} running on port ${PORT}`);
-  console.log(`✓ MariaDB: ${process.env.MARIADB_HOST || 'localhost'}:${process.env.MARIADB_PORT || 5432}/${dbName}`);
+  const ips = getAccessibleIps();
+  console.log(`✓ Points Service ${process.env.SERVICE } running on port ${PORT}`);
+  console.log(`✓ MariaDB: ${process.env.MARIADB_HOST}:${process.env.MARIADB_PORT}/${dbName}`);
+  console.log(`✓ Access via: ${ips.map(ip => `http://${ip}:${PORT}`).join(', ')}`);
 });
 
 // Graceful shutdown
