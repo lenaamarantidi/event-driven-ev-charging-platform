@@ -1,4 +1,6 @@
 import { useState, useEffect } from 'react';
+import axios from 'axios';
+import { BASE_URL, SERVICES } from '../config';
 import { analyticsAPI, providerAPI } from '../utils/apiClient';
 
 const OperatorDashboard = ({ setToken }) => {
@@ -31,27 +33,22 @@ const OperatorDashboard = ({ setToken }) => {
 
       // Κανονικοποίηση global metrics
       if (globalAnalyticsResult.success) {
-        const data = globalAnalyticsResult.data.summary || globalAnalyticsResult.data || {};
+        const data = globalAnalyticsResult.data;
         setSystemMetrics({
-          totalProviders: data.total_providers || data.totalProviders || 0,
-          totalStations: data.total_stations || data.totalStations || 0,
-          activeStations: data.active_stations || data.activeStations || 0,
-          totalUsers: data.total_users || data.totalUsers || 0,
-          systemUtilization: data.system_utilization || data.utilization || 0,
-          totalTransactions: data.total_transactions || data.totalTransactions || 0
+          totalProviders: data.total_providers || 0,
+          totalStations: data.total_stations || 0,
+          activeStations: data.active_stations || 0,
+          totalUsers: data.total_users || 0,
+          systemUtilization: data.system_utilization || 0,
+          totalTransactions: data.total_transactions || 0
         });
       } else {
         console.warn('Global analytics error:', globalAnalyticsResult.error);
       }
 
       // Κανονικοποίηση providers list
-      if (providersResult.success) {
-        const providerList = Array.isArray(providersResult.data)
-          ? providersResult.data
-          : Array.isArray(providersResult.data?.providers)
-            ? providersResult.data.providers
-            : [];
-        setProviders(providerList);
+      if (providersResult.success && Array.isArray(providersResult.data)) {
+        setProviders(providersResult.data);
       } else {
         console.warn('Providers fetch error:', providersResult.error);
       }

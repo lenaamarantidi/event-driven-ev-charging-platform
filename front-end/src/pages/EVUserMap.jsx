@@ -1,5 +1,8 @@
 import { useState, useEffect } from 'react';
+import axios from 'axios';
+import { BASE_URL, SERVICES } from '../config';
 import { reservationAPI } from '../utils/apiClient';
+import ProviderDataMapper from '../utils/providerDataMapper';
 import MapView from '../components/MapView';
 import InfoPanel from '../components/InfoPanel';
 import Sidebar from '../components/Sidebar';
@@ -142,58 +145,36 @@ const EVUserMap = ({ setToken }) => {
   useEffect(() => {
     const fetchData = async () => {
       try {
+        // Κάλεσμα στο Reservation_Service για όλες τις κρατήσεις/σημεία
         const result = await reservationAPI.getAll();
-        const reservations = Array.isArray(result.data?.reservations)
-          ? result.data.reservations
-          : Array.isArray(result.data)
-            ? result.data
-            : [];
-
-        if (result.success) {
-          const normalized = reservations.map((point) => {
-            const location = point.reservation_details || point.location || {};
-            const latitude = location.latitude || location.lat || point.lat || 37.9755;
-            const longitude = location.longitude || location.lon || point.lon || 23.7348;
-            const outlets = Array.isArray(point.outlets) ? point.outlets : (location.outlets ? location.outlets : []);
-            const price = point.pricePerKwh || location.pricePerKwh || location.kwhprice || point.kwhprice || 0.45;
-            const cap = point.power || location.kwh || location.cap || 22;
-            const providerName = point.providerName || point.provider_name || location.providerName || 'Provider';
-
-            return {
-              pointid: String(point.unifiedPointId || point.point_id || point.id || Math.random()),
-              lat: parseFloat(latitude),
-              lon: parseFloat(longitude),
-              name: point.name || `${providerName} ${point.point_id || point.id || ''}`.trim(),
-              address: point.address || location.address || '',
-              connector_types: outlets.length > 0 ? outlets.map((o) => o.connector_type || o.type || 'Type 2') : ['Type 2'],
-              kwhprice: price,
-              cap,
-              distance: calculateDistance(userLocation[0], userLocation[1], parseFloat(latitude), parseFloat(longitude)),
-              outlets: outlets.length > 0 ? outlets.map((outlet) => ({
-                outlet_id: outlet.outlet_id || outlet.id || point.point_id,
-                connector_type: outlet.connector_type || outlet.type || 'Type 2',
-                kilowatts: outlet.kilowatts || outlet.power || cap,
-                status: outlet.status || point.status || point.currentStatus || 'available',
-                kwhprice: outlet.kwhprice || outlet.pricePerKwh || price
-              })) : [{
-                outlet_id: point.point_id || point.id || `${providerName}-${Math.random()}`,
-                connector_type: point.connector_types?.[0] || 'Type 2',
-                kilowatts: cap,
-                status: point.status || point.currentStatus || 'available',
-                kwhprice: price
-              }],
-              currentStatus: point.status || point.currentStatus || 'available',
-              providerName,
-              reservationEndTime: point.reservationEndTime || point.reservedUntil || location.reservationEndTime
-            };
-          }).map((location) => ({
+        
+        if (result.success && Array.isArray(result.data)) {
+          // Κανονικοποίηση responses χρησιμοποιώντας ProviderDataMapper
+          // Το Reservation_Service επιστρέφει ενοποιημένα σημεία ήδη
+          const normalized = result.data.map((point) => ({
+            pointid: String(point.unifiedPointId || point.id || Math.random()),
+            lat: point.coordinates?.latitude || point.lat || 37.9755,
+            lon: point.coordinates?.longitude || point.lon || 23.7348,
+            name: point.name || `${point.providerName} ${point.unifiedPointId}`,
+            address: point.address || '',
+            connector_types: point.connector_types || ['Type 2'],
+            kwhprice: point.pricePerKwh || 0.45,
+            cap: point.power || 22,
+            distance: calculateDistance(userLocation[0], userLocation[1], 
+                                       point.coordinates?.latitude || 37.9755,
+                                       point.coordinates?.longitude || 23.7348),
+            outlets: point.outlets || [],
+            currentStatus: point.currentStatus,
+            providerName: point.providerName,
+            reservationEndTime: point.reservationEndTime
+          })).map((location) => ({
             ...location,
             charger_type: (location.cap || 0) <= 22 ? 'AC' : 'DC'
           }));
-
+          
           setChargers(normalized);
         } else {
-          console.warn('Could not load reservation points:', result.error);
+          console.warn('Δεν ήταν δυνατή η ανάκτηση σημείων:', result.error);
           setChargers([]);
         }
       } catch (err) {
