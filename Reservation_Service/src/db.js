@@ -10,7 +10,7 @@ require('dotenv').config();
 let pool;
 
 const DB_CONFIG = {
-  host: process.env.DB_HOST || 'localhost',
+  host: process.env.DB_HOST || 'mariadb-reservations', // <--- Η αλλαγή έγινε εδώ!
   port: process.env.DB_PORT || 3306,
   user: process.env.DB_USER || 'reservation_user',
   password: process.env.DB_PASSWORD || 'reservation_pass',

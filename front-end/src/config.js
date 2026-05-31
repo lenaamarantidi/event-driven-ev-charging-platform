@@ -7,7 +7,6 @@
 
 // Service-Specific URLs
 export const SERVICES = {
-  auth: 'http://127.0.0.1:3100',               // Auth Service
   providers: 'http://127.0.0.1:3105/api',      // Provider Management Service (UC03)
   analytics: 'http://127.0.0.1:3102/api',      // Analytics Service (UC04)
   billing: 'http://127.0.0.1:3103/api',        // Billing Service (UC05)

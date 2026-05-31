@@ -42,17 +42,17 @@ services:
       - saasplug-network
     restart: unless-stopped
 
-  # MySQL Central Database
+  # MariaDB Central Database
   mysql-central:
-    image: mysql:8.0
+    image: mariadb:11
     container_name: saasplug-mysql-central
     environment:
       MYSQL_ROOT_PASSWORD: root
-      MYSQL_DATABASE: saas_central
+      MYSQL_DATABASE: central
     ports:
       - "3306:3306"
     healthcheck:
-      test: mysqladmin ping -h localhost
+      test: ["CMD", "mariadb-admin", "ping", "-h", "localhost", "-uroot", "-proot"]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -60,7 +60,7 @@ services:
       - saasplug-network
     volumes:
       - mysql-central-data:/var/lib/mysql
-      - ./databases/central-db.sql:/docker-entrypoint-initdb.d/01-central.sql
+      - ./Points_Service/db/central-db.sql:/docker-entrypoint-initdb.d/01-central.sql
 
   # MySQL Statistics Database
   mysql-statistics:
@@ -162,26 +162,28 @@ services:
       - mysql-blue-data:/var/lib/mysql
       - ./databases/provider-db.sql:/docker-entrypoint-initdb.d/01-provider.sql
 
-  # PostgreSQL Database for Points, Reservations and Billing
-  postgres:
-    image: postgis/postgis:15-3.4-alpine
-    container_name: saasplug-postgres
+  # MariaDB Database for Reservation Service
+  mariadb-reservations:
+    image: mariadb:11
+    container_name: saasplug-mariadb-reservations
     environment:
-      POSTGRES_USER: postgres
-      POSTGRES_PASSWORD: password
-      POSTGRES_DB: points_service
+      MYSQL_ROOT_PASSWORD: root
+      MYSQL_DATABASE: reservation_db
+      MYSQL_USER: reservation_user
+      MYSQL_PASSWORD: reservation_pass
     ports:
-      - "5432:5432"
+      - "3320:3306"
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      test: ["CMD", "mariadb-admin", "ping", "-h", "localhost", "-uroot", "-proot"]
       interval: 10s
       timeout: 5s
       retries: 5
     networks:
       - saasplug-network
     volumes:
-      - postgres-data:/var/lib/postgresql/data
-      - ./databases/postgres-init.sh:/docker-entrypoint-initdb.d/init-postgres.sh:ro
+      - mariadb-reservations-data:/var/lib/mysql
+      - ./Reservation_Service/db/schema.sql:/docker-entrypoint-initdb.d/01-reservation.sql
+    restart: unless-stopped
 
   # MariaDB for Provider Management Service
   mariadb-provider:
@@ -216,12 +218,16 @@ services:
     environment:
       PORT: 3001
       NODE_ENV: production
-      POINTS_DB_URL: postgresql://postgres:password@postgres:5432/points_service
+      MARIADB_HOST: mysql-central
+      MARIADB_PORT: 3306
+      MARIADB_DB: central
+      MARIADB_USER: root
+      MARIADB_PASSWORD: root
       RABBITMQ_URL: amqp://guest:guest@rabbitmq:5672
     depends_on:
       rabbitmq:
         condition: service_healthy
-      postgres:
+      mysql-central:
         condition: service_healthy
     networks:
       - saasplug-network
@@ -237,7 +243,11 @@ services:
     environment:
       PORT: 3009
       NODE_ENV: production
-      RESERVATIONS_DB_URL: postgresql://postgres:password@postgres:5432/reservations_service
+      DB_HOST: mariadb-reservations
+      DB_PORT: 3306
+      DB_USER: reservation_user
+      DB_PASSWORD: reservation_pass
+      DB_NAME: reservation_db
       RABBITMQ_URL: amqp://guest:guest@rabbitmq:5672
       REDPLUG_API_URL: https://davinci.softlab.ntua.gr/saas26/redPlug/api
       GREENPLUG_API_URL: https://davinci.softlab.ntua.gr/saas26/greenPlug/api
@@ -245,7 +255,7 @@ services:
     depends_on:
       rabbitmq:
         condition: service_healthy
-      postgres:
+      mariadb-reservations:
         condition: service_healthy
     networks:
       - saasplug-network
@@ -538,7 +548,7 @@ volumes:
   mysql-red-data:
   mysql-green-data:
   mysql-blue-data:
-  postgres-data:
+  mariadb-reservations-data:
   mariadb-provider-data:
   mariadb-analytics-data:
   mariadb-auth-data:
