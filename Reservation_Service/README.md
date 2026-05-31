@@ -330,6 +330,25 @@ BLUEPLUG_BASE_URL=http://localhost:8003
 BLUEPLUG_API_KEY=your-api-key
 ```
 
+**Postman / API Key instructions**
+
+- Φορτώστε στο Postman τις συλλογές που έχουν δοθεί για την εργασία.
+- Βρείτε τη μεταβλητή `apiKey` στις Postman Variables και αντικαταστήστε το `sk_saas_replace_me` με το API key ομάδας:
+
+```text
+sk_saas_5dec282b47047b6eced41e64
+```
+
+- Στον τοπικό `.env`, χρησιμοποιήστε το ίδιο κλειδί για τους παρόχους:
+
+```env
+REDPLUG_API_KEY=sk_saas_5dec282b47047b6eced41e64
+GREENPLUG_API_KEY=sk_saas_5dec282b47047b6eced41e64
+BLUEPLUG_API_KEY=sk_saas_5dec282b47047b6eced41e64
+```
+
+- Τρέξτε το API όπως περιγράφεται στην τεκμηρίωση της εργασίας.
+
 ---
 
 ## 🏗️ Project Structure

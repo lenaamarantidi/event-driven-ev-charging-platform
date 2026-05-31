@@ -8,6 +8,7 @@
  */
 
 const amqp = require('amqplib');
+const fs = require('fs');
 const { pool } = require('./db');
 
 let connection = null;
@@ -15,7 +16,7 @@ let channel = null;
 
 const RABBITMQ_URL = process.env.RABBITMQ_URL || 'amqp://localhost';
 const EXCHANGE_NAME = 'billing_exchange';
-const QUEUE_NAME = 'billing_events_queue';
+const QUEUE_NAME = 'billing_reservation_queue';
 const QUEUE_DEADLETTER = 'billing_dlq';
 
 /**
@@ -84,19 +85,64 @@ async function handleBillingEvent(msg) {
   if (!msg) return;
 
   try {
-    const content = msg.content.toString();
-    const event = JSON.parse(content);
+    const raw = msg.content;
+    console.log('Received message properties:', msg.properties || {});
+    console.log('msg.content typeof:', typeof raw, 'isBuffer:', Buffer.isBuffer(raw));
+    console.log(`Raw message length: ${raw ? raw.length : 0}`);
+
+    const content = raw ? raw.toString('utf8') : '';
+    console.log('Message content (utf8):', content);
+    if (raw) console.log('Message content (hex):', raw.toString('hex'));
+    let event;
+    try {
+      event = JSON.parse(content);
+    } catch (parseErr) {
+      console.error('JSON.parse failed for message content:', parseErr.message);
+      console.error('Message content (utf8):', content);
+      if (raw) {
+        console.error('Message content (base64):', raw.toString('base64'));
+        console.error('Message content (hex):', raw.toString('hex'));
+      }
+
+      // Dump raw payload to file for offline inspection
+      try {
+        fs.mkdirSync('logs', { recursive: true });
+        const dump = {
+          ts: new Date().toISOString(),
+          properties: msg.properties || {},
+          utf8: content,
+          base64: raw ? raw.toString('base64') : null,
+          hex: raw ? raw.toString('hex') : null
+        };
+        fs.appendFileSync('logs/billing_msg_dumps.log', JSON.stringify(dump) + '\n');
+        console.error('Wrote raw message dump to logs/billing_msg_dumps.log');
+      } catch (dumpErr) {
+        console.error('Failed to write raw message dump:', dumpErr.message);
+      }
+
+      // Try a defensive second attempt: sometimes payloads are doubly-encoded strings
+      try {
+        const inner = JSON.parse(content.replace(/^"|"$/g, ''));
+        event = typeof inner === 'string' ? JSON.parse(inner) : inner;
+      } catch (secondErr) {
+        console.error('Second parse attempt failed:', secondErr.message);
+      }
+    }
+
+    if (!event) {
+      throw new Error('Unable to parse incoming RabbitMQ message into JSON');
+    }
 
     console.log(`Processing billing event: ${event.eventType}`);
 
-    const { data } = event;
-    const providerId = data.providerId || data.provider_id;
-    const reservationId = data.reservationId || data.reservation_id;
-    const amount = data.amount || data.estimatedCost;
-    const timestamp = event.timestamp || new Date().toISOString();
+    const data = event.data || {};
+    const providerId = data.providerId || data.provider_id || data.event_metadata?.provider_id;
+    const reservationId = data.reservationId || data.reservation_id || data.event_metadata?.reservation_id;
+    const amount = data.amount || data.estimatedCost || data.event_metadata?.amount || 0;
+    const timestamp = event.timestamp || data.timestamp || new Date().toISOString();
 
     if (!providerId) {
-      console.error('Event missing providerId:', event);
+      console.error('Event missing providerId:', { event, data });
       channel.nack(msg, false, false); // Dead-letter
       return;
     }
@@ -119,13 +165,17 @@ async function handleBillingEvent(msg) {
       billAmount = await getDefaultPricing();
     }
 
+    // Normalize reservation id to integer (DB expects integer id); fallback to 0
+    let reservationIdParam = parseInt(reservationId, 10);
+    if (isNaN(reservationIdParam)) reservationIdParam = 0;
+
     // Insert billable event
     await pool.query(
       `INSERT INTO billable_events (provider_id, reservation_id, amount, event_type, created_at, billing_month)
        VALUES (?, ?, ?, 'reservation', ?, ?)`,
       [
         providerId,
-        reservationId || 0,
+        reservationIdParam,
         parseFloat(billAmount),
         new Date(timestamp),
         billingMonthStr
