@@ -1,10 +1,8 @@
 import { useState, useEffect } from 'react';
-import axios from 'axios';
-import { BASE_URL } from '../config';
+import { analyticsAPI, billingAPI, reservationAPI } from '../utils/apiClient';
 
 const ProviderDashboard = ({ setToken }) => {
   const [activeTab, setActiveTab] = useState('overview');
-  const [stations, setStations] = useState([]);
   const [analytics, setAnalytics] = useState({
     totalStations: 0,
     activeStations: 0,
@@ -12,30 +10,141 @@ const ProviderDashboard = ({ setToken }) => {
     revenue: 0,
     utilization: 0
   });
+  const [dailyRecords, setDailyRecords] = useState([]);
+  const [reservations, setReservations] = useState([]);
+  const [outstandingInvoices, setOutstandingInvoices] = useState([]);
+  const [paymentHistory, setPaymentHistory] = useState([]);
+  const [invoiceStatus, setInvoiceStatus] = useState('');
+  const [exporting, setExporting] = useState(false);
+  const [payingInvoiceId, setPayingInvoiceId] = useState(null);
   const [selectedStation, setSelectedStation] = useState(null);
   const [loading, setLoading] = useState(true);
+
+  const providerId = localStorage.getItem('providerId') || '1';
+  const providerName = localStorage.getItem('providerName') || localStorage.getItem('username') || `Provider ${providerId}`;
 
   useEffect(() => {
     fetchProviderData();
   }, []);
 
   const fetchProviderData = async () => {
+    setLoading(true);
+    setInvoiceStatus('');
+
     try {
-      const token = localStorage.getItem('token');
-      const headers = token ? { Authorization: `Bearer ${token}` } : {};
+      const analyticsResult = await analyticsAPI.getProviderAnalytics(providerId, { period: 'monthly' });
+      const dailyResult = await analyticsAPI.getDailyAnalytics(providerId);
+      const billingSummaryResult = await billingAPI.getSummary(providerId);
+      const outstandingResult = await billingAPI.getOutstandingInvoices(providerId);
+      const paymentHistoryResult = await billingAPI.getInvoiceHistory(providerId, 12);
+      const reservationResult = await reservationAPI.getAll();
 
-      // Fetch provider's stations
-      const stationsRes = await axios.get(`${BASE_URL}/provider/stations`, { headers });
-      setStations(stationsRes.data || []);
+      const summary = analyticsResult.success ? analyticsResult.data.summary || analyticsResult.data : {};
+      setAnalytics({
+        totalStations: summary.stations_count || summary.total_stations || 0,
+        activeStations: summary.active_stations || summary.activeStations || 0,
+        totalReservations: summary.total_reservations || summary.reservations || 0,
+        revenue: billingSummaryResult.success ? billingSummaryResult.data.summary?.total_paid || billingSummaryResult.data.summary?.total_revenue || 0 : 0,
+        utilization: summary.utilization_rate || summary.utilization || 0
+      });
 
-      // Fetch provider analytics
-      const analyticsRes = await axios.get(`${BASE_URL}/provider/analytics`, { headers });
-      setAnalytics(analyticsRes.data || {});
+      setDailyRecords(dailyResult.success ? dailyResult.data.daily_records || dailyResult.data || [] : []);
+      setOutstandingInvoices(outstandingResult.success ? outstandingResult.data.invoices || [] : []);
+      setPaymentHistory(paymentHistoryResult.success ? paymentHistoryResult.data.payments || paymentHistoryResult.data.history || [] : []);
 
-      setLoading(false);
+      if (reservationResult.success) {
+        const resolvedReservations = Array.isArray(reservationResult.data?.reservations)
+          ? reservationResult.data.reservations
+          : [];
+
+        setReservations(
+          resolvedReservations.filter((item) =>
+            String(item.provider_id) === String(providerId)
+            || String(item.provider_name || '').toLowerCase().includes(providerName.toLowerCase())
+          )
+        );
+      } else {
+        setReservations([]);
+      }
     } catch (err) {
       console.error('Error fetching provider data:', err);
+      setAnalytics({
+        totalStations: 0,
+        activeStations: 0,
+        totalReservations: 0,
+        revenue: 0,
+        utilization: 0
+      });
+      setDailyRecords([]);
+      setOutstandingInvoices([]);
+      setPaymentHistory([]);
+      setReservations([]);
+    } finally {
       setLoading(false);
+    }
+  };
+
+  const handleExportLogs = async () => {
+    setExporting(true);
+    setInvoiceStatus('');
+
+    try {
+      const response = await analyticsAPI.exportLogs(providerId, 'csv');
+      if (!response.success) {
+        throw new Error(response.error || 'Failed to export logs');
+      }
+
+      const fileData = response.data instanceof Blob ? response.data : new Blob([response.data], { type: 'text/csv;charset=utf-8;' });
+      const url = window.URL.createObjectURL(fileData);
+      const link = document.createElement('a');
+      link.href = url;
+      link.setAttribute('download', `provider-${providerId}-analytics-${new Date().toISOString().slice(0, 10)}.csv`);
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      window.URL.revokeObjectURL(url);
+      setInvoiceStatus('Export completed successfully.');
+    } catch (err) {
+      console.error(err);
+      setInvoiceStatus('Unable to export logs. Please try again later.');
+    } finally {
+      setExporting(false);
+    }
+  };
+
+  const handleRequestInvoice = async () => {
+    setInvoiceStatus('');
+
+    try {
+      const response = await analyticsAPI.requestInvoice(providerId);
+      if (!response.success) {
+        throw new Error(response.error || 'Unable to request invoice');
+      }
+      setInvoiceStatus(response.data?.message || 'Invoice request submitted successfully.');
+      await fetchProviderData();
+    } catch (err) {
+      console.error(err);
+      setInvoiceStatus('Invoice request failed. Please try again.');
+    }
+  };
+
+  const handlePayInvoice = async (invoiceId) => {
+    setPayingInvoiceId(invoiceId);
+    try {
+      const response = await billingAPI.processPayment(providerId, invoiceId, {
+        paymentMethod: 'bank_transfer',
+        reference: `frontend-${invoiceId}`
+      });
+      if (!response.success) {
+        throw new Error(response.error || 'Payment failed');
+      }
+      setInvoiceStatus('Payment completed successfully.');
+      await fetchProviderData();
+    } catch (err) {
+      console.error(err);
+      setInvoiceStatus('Payment could not be processed.');
+    } finally {
+      setPayingInvoiceId(null);
     }
   };
 
@@ -218,38 +327,37 @@ const ProviderDashboard = ({ setToken }) => {
               <button className="btn btn-primary">+ Add Station</button>
             </div>
 
-            {stations.length === 0 ? (
+            {dailyRecords.length === 0 ? (
               <div className="alert alert-info text-center p-5">
-                <p>No stations found. Add your first station to get started!</p>
+                <p>No station analytics available yet.</p>
               </div>
             ) : (
               <div className="row">
-                {stations.map((station) => (
-                  <div key={station.id} className="col-md-6 col-lg-4 mb-3">
+                {dailyRecords.map((record, index) => (
+                  <div key={`station-${index}`} className="col-md-6 col-lg-4 mb-3">
                     <div
                       className="card cursor-pointer"
-                      onClick={() => setSelectedStation(station)}
+                      onClick={() => setSelectedStation(record)}
                       style={{ cursor: 'pointer', transition: 'transform 0.2s' }}
                     >
                       <div className="card-body">
-                        <h5 className="card-title">{station.name}</h5>
-                        <p className="card-text text-muted small mb-2">{station.address}</p>
-                        
+                        <h5 className="card-title">{record.station_name || `Station ${index + 1}`}</h5>
+                        <p className="card-text text-muted small mb-2">{record.location || 'Provider Station'}</p>
                         <div className="mb-3">
-                          <span className={`badge bg-${station.status === 'active' ? 'success' : 'warning'}`}>
-                            {station.status === 'active' ? '🟢 Active' : '🟡 Maintenance'}
+                          <span className={`badge bg-${record.status === 'active' ? 'success' : 'warning'}`}>
+                            {record.status === 'active' ? '🟢 Active' : '🟡 Maintenance'}
                           </span>
                         </div>
 
                         <div className="small">
                           <p className="mb-1">
-                            <strong>Outlets:</strong> {station.outlets_count || 0}
+                            <strong>Reservations:</strong> {record.total_reservations ?? record.reservations ?? 0}
                           </p>
                           <p className="mb-1">
-                            <strong>Available:</strong> {station.available_count || 0}
+                            <strong>Searches:</strong> {record.total_searches ?? record.searches ?? 0}
                           </p>
                           <p className="mb-0">
-                            <strong>Utilization:</strong> {station.utilization || 0}%
+                            <strong>Utilization:</strong> {record.utilization_rate ?? record.utilization ?? 0}%
                           </p>
                         </div>
                       </div>
@@ -267,15 +375,15 @@ const ProviderDashboard = ({ setToken }) => {
                 <div className="modal-dialog">
                   <div className="modal-content">
                     <div className="modal-header">
-                      <h5 className="modal-title">{selectedStation.name}</h5>
+                      <h5 className="modal-title">{selectedStation.station_name || 'Station details'}</h5>
                       <button type="button" className="btn-close" onClick={() => setSelectedStation(null)}></button>
                     </div>
                     <div className="modal-body">
-                      <p><strong>Status:</strong> {selectedStation.status}</p>
-                      <p><strong>Location:</strong> {selectedStation.address}</p>
-                      <p><strong>Total Outlets:</strong> {selectedStation.outlets_count}</p>
-                      <p><strong>Available:</strong> {selectedStation.available_count}</p>
-                      <p><strong>Utilization:</strong> {selectedStation.utilization}%</p>
+                      <p><strong>Status:</strong> {selectedStation.status || 'active'}</p>
+                      <p><strong>Location:</strong> {selectedStation.location || 'Unknown'}</p>
+                      <p><strong>Reservations:</strong> {selectedStation.total_reservations ?? selectedStation.reservations ?? 0}</p>
+                      <p><strong>Searches:</strong> {selectedStation.total_searches ?? selectedStation.searches ?? 0}</p>
+                      <p><strong>Utilization:</strong> {selectedStation.utilization_rate ?? selectedStation.utilization ?? 0}%</p>
                     </div>
                     <div className="modal-footer">
                       <button type="button" className="btn btn-secondary" onClick={() => setSelectedStation(null)}>Close</button>
@@ -294,38 +402,42 @@ const ProviderDashboard = ({ setToken }) => {
             <h3 className="mb-4">Reservations</h3>
             <div className="card">
               <div className="card-body">
-                <div className="table-responsive">
-                  <table className="table table-hover">
-                    <thead>
-                      <tr>
-                        <th>Date</th>
-                        <th>Station</th>
-                        <th>User</th>
-                        <th>Duration</th>
-                        <th>Revenue</th>
-                        <th>Status</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      <tr>
-                        <td>2025-05-04</td>
-                        <td>Station A</td>
-                        <td>User123</td>
-                        <td>45 min</td>
-                        <td>€12.50</td>
-                        <td><span className="badge bg-success">Completed</span></td>
-                      </tr>
-                      <tr>
-                        <td>2025-05-04</td>
-                        <td>Station B</td>
-                        <td>User456</td>
-                        <td>30 min</td>
-                        <td>€8.75</td>
-                        <td><span className="badge bg-info">In Progress</span></td>
-                      </tr>
-                    </tbody>
-                  </table>
-                </div>
+                {reservations.length === 0 ? (
+                  <div className="alert alert-info text-center p-5">
+                    <p>No reservation history available yet.</p>
+                  </div>
+                ) : (
+                  <div className="table-responsive">
+                    <table className="table table-hover">
+                      <thead>
+                        <tr>
+                          <th>Date</th>
+                          <th>Station</th>
+                          <th>User</th>
+                          <th>Duration</th>
+                          <th>Price</th>
+                          <th>Status</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {reservations.map((reservation) => (
+                          <tr key={reservation.reservation_id || `${reservation.point_id}-${reservation.user_id}`}>
+                            <td>{new Date(reservation.created_at || reservation.timestamp || Date.now()).toLocaleDateString()}</td>
+                            <td>{reservation.station_name || reservation.provider_name || `Point ${reservation.point_id}`}</td>
+                            <td>{reservation.user_id || reservation.user_name || 'Guest'}</td>
+                            <td>{reservation.duration ? `${reservation.duration} min` : 'N/A'}</td>
+                            <td>{reservation.price ? `€${reservation.price.toFixed(2)}` : 'N/A'}</td>
+                            <td>
+                              <span className={`badge bg-${reservation.status === 'completed' ? 'success' : reservation.status === 'in_progress' ? 'info' : 'secondary'}`}>
+                                {reservation.status || 'unknown'}
+                              </span>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
               </div>
             </div>
           </div>
@@ -335,41 +447,117 @@ const ProviderDashboard = ({ setToken }) => {
         {activeTab === 'reports' && (
           <div>
             <h3 className="mb-4">Reports & Analytics</h3>
-            <div className="row">
+            <div className="row mb-4">
               <div className="col-md-6 mb-3">
-                <div className="card">
+                <div className="card h-100">
                   <div className="card-header bg-light">
-                    <h5 className="mb-0">Revenue Report</h5>
+                    <h5 className="mb-0">Billing Summary</h5>
                   </div>
                   <div className="card-body">
-                    <div className="mb-3">
-                      <p className="text-muted small">Monthly Revenue</p>
-                      <h3>€5,250.00</h3>
-                    </div>
-                    <div className="mb-3">
-                      <p className="text-muted small">Weekly Average</p>
-                      <h4>€1,312.50</h4>
-                    </div>
-                    <button className="btn btn-sm btn-outline-primary">Download Report</button>
+                    <p className="text-muted small">Outstanding Invoices</p>
+                    <h3>{outstandingInvoices.length}</h3>
+                    <p className="text-muted small">Total Due</p>
+                    <h4>€{outstandingInvoices.reduce((sum, invoice) => sum + (invoice.amount || 0), 0).toFixed(2)}</h4>
+                    <button className="btn btn-primary mt-3" onClick={handleRequestInvoice}>
+                      Request Invoice
+                    </button>
                   </div>
                 </div>
               </div>
 
               <div className="col-md-6 mb-3">
-                <div className="card">
+                <div className="card h-100">
                   <div className="card-header bg-light">
-                    <h5 className="mb-0">Usage Statistics</h5>
+                    <h5 className="mb-0">Export Logs</h5>
                   </div>
                   <div className="card-body">
-                    <div className="mb-3">
-                      <p className="text-muted small">Total Sessions</p>
-                      <h3>842</h3>
-                    </div>
-                    <div className="mb-3">
-                      <p className="text-muted small">Average Session Duration</p>
-                      <h4>38 minutes</h4>
-                    </div>
-                    <button className="btn btn-sm btn-outline-primary">View Details</button>
+                    <p className="text-muted small">Download provider analytics logs for review.</p>
+                    <button className="btn btn-outline-primary" onClick={handleExportLogs} disabled={exporting}>
+                      {exporting ? 'Exporting...' : 'Export CSV'}
+                    </button>
+                    {invoiceStatus && <p className="text-success mt-3">{invoiceStatus}</p>}
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <div className="row">
+              <div className="col-lg-6 mb-3">
+                <div className="card">
+                  <div className="card-header bg-light">
+                    <h5 className="mb-0">Outstanding Invoices</h5>
+                  </div>
+                  <div className="card-body p-0">
+                    {outstandingInvoices.length === 0 ? (
+                      <div className="p-4 text-center text-muted">No outstanding invoices.</div>
+                    ) : (
+                      <div className="table-responsive">
+                        <table className="table table-bordered mb-0">
+                          <thead>
+                            <tr>
+                              <th>Invoice</th>
+                              <th>Amount</th>
+                              <th>Status</th>
+                              <th></th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {outstandingInvoices.map((invoice) => (
+                              <tr key={invoice.invoice_id || invoice.id}>
+                                <td>{invoice.invoice_id || invoice.id}</td>
+                                <td>€{(invoice.amount || 0).toFixed(2)}</td>
+                                <td>{invoice.status || 'pending'}</td>
+                                <td>
+                                  <button
+                                    className="btn btn-sm btn-success"
+                                    onClick={() => handlePayInvoice(invoice.invoice_id || invoice.id)}
+                                    disabled={payingInvoiceId === (invoice.invoice_id || invoice.id)}
+                                  >
+                                    {payingInvoiceId === (invoice.invoice_id || invoice.id) ? 'Paying...' : 'Pay'}
+                                  </button>
+                                </td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              </div>
+
+              <div className="col-lg-6 mb-3">
+                <div className="card">
+                  <div className="card-header bg-light">
+                    <h5 className="mb-0">Payment History</h5>
+                  </div>
+                  <div className="card-body p-0">
+                    {paymentHistory.length === 0 ? (
+                      <div className="p-4 text-center text-muted">No payment history available.</div>
+                    ) : (
+                      <div className="table-responsive">
+                        <table className="table table-bordered mb-0">
+                          <thead>
+                            <tr>
+                              <th>Date</th>
+                              <th>Reference</th>
+                              <th>Amount</th>
+                              <th>Status</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {paymentHistory.map((payment) => (
+                              <tr key={payment.payment_id || payment.id || payment.reference}>
+                                <td>{new Date(payment.paid_at || payment.date || Date.now()).toLocaleDateString()}</td>
+                                <td>{payment.reference || payment.invoice_id || '–'}</td>
+                                <td>€{(payment.amount || 0).toFixed(2)}</td>
+                                <td>{payment.status || 'completed'}</td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    )}
                   </div>
                 </div>
               </div>
