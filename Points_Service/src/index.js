@@ -75,13 +75,119 @@ const { normalizePoint } = require('./plugs_api');
 // ============== HELPER FUNCTIONS ==============
 const { getAccessibleIps } = require('./util');
 
+const reservationTimers = new Map();
+
+function scheduleReservationExpiry(pointId, reservationEndTime) {
+  try {
+    // Calculate remaining time in milliseconds
+    const endTime = new Date(reservationEndTime).getTime();
+    const now = new Date().getTime();
+    const remainingMs = endTime - now;
+
+    // Clear any existing timer for this point
+    if (reservationTimers.has(pointId)) {
+      clearTimeout(reservationTimers.get(pointId));
+    }
+
+    // Set timer to update status when reservation expires
+    if (remainingMs > 0) {
+      const timerId = setTimeout(async () => {
+        try {
+          console.log(`⏰ Reservation expired for point ${pointId}, updating status to available`);
+
+          // first get new point status from povider api
+          // Get point details from provider API
+          const service = process.env.SERVICE;
+          const s = String(service).toLowerCase();
+          
+          let plugKey;
+          if (s.includes('green')) plugKey = 'greenPlug';
+          else if (s.includes('red')) plugKey = 'redPlug';
+          else if (s.includes('blue')) plugKey = 'bluePlug';
+          else throw new Error('Unknown service');
+
+          const config = PROVIDER_MAP[plugKey];
+          const url = buildProviderUrl(plugKey, "detailPath", pointId);
+
+          const bearerToken = process.env.BEARER_TOKEN;
+          const headers = { Accept: 'application/json' };
+          if (bearerToken) {
+            headers.Authorization = `Bearer ${bearerToken}`;
+          }
+
+          const providerResp = await axios.get(url, {
+            timeout: 10000,
+            headers
+          });
+
+          const pointData = providerResp.data || {};
+          const normalized = normalizePoint(pointData, plugKey);
+          const currentStatus = normalized.status;
+
+          console.log(`📊 Point ${pointId} current status from provider: ${currentStatus}`);
+
+          // Query DB to get current point status
+          const [dbRows] = await pointsMysql.query(
+            'SELECT * FROM points WHERE point_id = ?',
+            [pointId]
+          );
+
+          if (dbRows.length === 0) {
+            throw new Error(`Point ${pointId} not found in database`);
+          }
+
+          if (dbRows.length > 1) {
+            throw new Error(`Duplicate points found in database for point_id ${pointId}: ${dbRows.length} rows`);
+          }
+
+          const dbPoint = dbRows[0];
+          console.log(`📋 Point ${pointId} current status in DB: ${dbPoint.status}`);
+          console.log(`📋 Point ${pointId} DB details:`, {
+            status: dbPoint.status,
+            reservationEndTime: dbPoint.reservation_end_time,
+            lastUpdated: dbPoint.last_updated
+          });
+
+          reservationTimers.delete(pointId);
+          // Compare statuses
+          if (String(dbPoint.status) !== String(currentStatus)) {
+            console.log(`Expected status mismatch for point ${pointId}:`);
+            console.log(`   DB status: ${dbPoint.status}`);
+            console.log(`   Provider status: ${currentStatus}`);
+            console.log(`   Updating DB to match provider status`);
+            await pointsMysql.query(
+              'UPDATE points SET status = ?, reservation_end_time = NULL, last_updated = CURRENT_TIMESTAMP WHERE point_id = ?',
+              [String(currentStatus), pointId]
+            );
+          } else {
+            throw new Error(`Expected status mismatch for point ${pointId}, but DB and provider have same status: ${dbPoint.status}`);
+          }
+
+        } catch (err) {
+          console.error(`Error updating expired reservation for ${pointId}:`, err.message);
+        }
+      }, remainingMs+60000); // add 1 minute because reservation end time does not take into account remaining seconds in the last minute, so we add a buffer to ensure the reservation has actually expired in the provider system before we update our DB.
+
+      reservationTimers.set(pointId, timerId);
+      console.log(`⏱️ Timer scheduled for point ${pointId}, expires in ${Math.floor(remainingMs / 1000)} seconds`);
+    }
+
+    return remainingMs;
+  } catch (err) {
+    console.error(`Error scheduling reservation expiry for ${pointId}:`, err.message);
+    return 0;
+  }
+}
+
 // ============== REST ENDPOINTS CONST URLS ==============
 
 const API_POINTS = '/api/points';
 const API_POINTS_BY_ID = '/api/points/:pointId';
 const API_POINTS_RESERVE = '/api/points/:pointId/reserve';
 const API_POINTS_RESERVE_MINUTES = '/api/points/:pointId/reserve/:minutes';
+
 const PLUGAPI_POINTS = '/plugApi/points';
+const PLUGAPI_POINT = '/plugApi/points/:pointId';
 
 const DB_REPOPULATE = '/db/repopulate';
 const HEALTH = '/health';
@@ -150,6 +256,61 @@ app.get(PLUGAPI_POINTS, async (req, res) => {
   }
 });
 
+app.get(PLUGAPI_POINT, async (req, res) => {
+  try {
+    const { pointId } = req.params;
+    const service = process.env.SERVICE;
+
+    if (!service) {
+      throw new Error(
+        "Missing process.env.SERVICE. Provide a plug name (red/green/blue)"
+      );
+    }
+
+    const s = String(service).toLowerCase();
+
+    let plugKey;
+    if (s.includes('green')) plugKey = 'greenPlug';
+    else if (s.includes('red')) plugKey = 'redPlug';
+    else if (s.includes('blue')) plugKey = 'bluePlug';
+    else {
+      throw new Error(`Invalid SERVICE: ${service}`);
+    }
+
+    const config = PROVIDER_MAP[plugKey];
+    if (!config) throw new Error(`Unknown provider: ${plugKey}`);
+
+    const url = buildProviderUrl(plugKey, "detailPath", pointId);
+
+    const bearerToken = process.env.BEARER_TOKEN;
+    const requestHeaders = { Accept: 'application/json' };
+    if (bearerToken) {
+      requestHeaders.Authorization = `Bearer ${bearerToken}`;
+    }
+
+    console.log(`📡 Fetching point ${pointId} from ${plugKey}: ${url}`);
+    const providerResp = await axios.get(url, {
+      timeout: 10000,
+      headers: requestHeaders,
+    });
+
+    const payload = {
+      service,
+      plugKey,
+      pointId,
+      url,
+      data: providerResp.data,
+    };
+
+    console.log('[/plugApi/points/:pointId] provider json:', payload);
+    return res.json(payload);
+
+  } catch (err) {
+    console.error('Error in /plugApi/points/:pointId:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // ---- db ----
 
 /**
@@ -190,7 +351,7 @@ app.post(DB_REPOPULATE, async (req, res) => {
 
     const providerResp = await axios.get(url, { timeout: 10000, headers });
 
-    const rawPoints = Array.isArray(providerResp.data)
+    let rawPoints = Array.isArray(providerResp.data)
       ? providerResp.data
       : providerResp.data.points || providerResp.data;
 
@@ -198,12 +359,24 @@ app.post(DB_REPOPULATE, async (req, res) => {
       throw new Error('Provider response did not contain an array of points');
     }
 
+    // Filter points if IDs provided in request body
+    const { points: filterIds } = req.body || {};
+    if (Array.isArray(filterIds) && filterIds.length > 0) {
+      rawPoints = rawPoints.filter(p => {
+        const pointId = p.pointid || p.id || p.chargerId;
+        return filterIds.includes(pointId) || filterIds.includes(String(pointId));
+      });
+      console.log(`📋 Filtering to ${rawPoints.length} points from provided IDs: ${filterIds.join(', ')}`);
+    }
+
     const client = await pointsMysql.getConnection();
     try {
       await client.beginTransaction();
 
-      // Empty the table first (full repopulate)
-      await client.query('DELETE FROM points');
+      // Empty the table first (full repopulate) - or just update if filtering
+      if (!Array.isArray(filterIds) || filterIds.length === 0) {
+        await client.query('DELETE FROM points');
+      }
 
       let newCount = 0;
       let updatedCount = 0;
@@ -263,6 +436,8 @@ app.post(DB_REPOPULATE, async (req, res) => {
         fetched: rawPoints.length,
         newCount,
         updatedCount,
+        filtered: Array.isArray(filterIds) && filterIds.length > 0,
+        filterIds: filterIds || null,
       };
 
       console.log('[/db/populate]', payload);
@@ -461,12 +636,15 @@ const { pointId } = req.params;
 
     console.log(`✓ Point ${pointId} reserved successfully, status updated to ${newStatus}`);
 
+    const remainingMs = scheduleReservationExpiry(pointId, reservationEndTime);
+
     res.json({
       pointId,
       provider,
       status: newStatus,
       reservationEndTime: reservationEndTime,
       timestamp: new Date(),
+      expiresIn: `${Math.floor(remainingMs / 1000)} seconds`,
       message: `Point ${pointId} reserved successfully via ${provider} both on provider api and DB`
     });
   } catch (err) {
