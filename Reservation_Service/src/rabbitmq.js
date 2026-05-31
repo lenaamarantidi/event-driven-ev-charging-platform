@@ -85,38 +85,37 @@ async function publishReservationEvent(eventData) {
     } = eventData;
 
     const message = {
+      eventType: 'reservation_successful',
       type: 'reservation_successful',
-      reservationId,
-      providerId,
-      providerName,
-      pointId,
-      duration,
       timestamp,
-      // Additional metadata for analytics
-      action_type: 'reservation_made',
-      event_metadata: {
-        reservation_id: reservationId,
-        provider_id: providerId,
-        point_id: pointId,
-        duration_minutes: duration
+      data: {
+        reservationId,
+        providerId,
+        providerName,
+        pointId,
+        duration,
+        event_metadata: {
+          reservation_id: reservationId,
+          provider_id: providerId,
+          point_id: pointId,
+          duration_minutes: duration
+        }
       }
     };
 
-    const messageBuffer = Buffer.from(JSON.stringify(message, null, 2));
+    const messageBuffer = Buffer.from(JSON.stringify(message));
 
     // Publish to both billing and analytics exchanges
     const billingPublished = channel.publish(
       EXCHANGES.billing,
       'reservation_successful',
-      messageBuffer,
-      { persistent: true, contentType: 'application/json' }
+      messageBuffer
     );
 
     const analyticsPublished = channel.publish(
       EXCHANGES.analytics,
       'reservation_successful',
-      messageBuffer,
-      { persistent: true, contentType: 'application/json' }
+      messageBuffer
     );
 
     if (!billingPublished || !analyticsPublished) {

@@ -252,6 +252,9 @@ services:
       REDPLUG_API_URL: https://davinci.softlab.ntua.gr/saas26/redPlug/api
       GREENPLUG_API_URL: https://davinci.softlab.ntua.gr/saas26/greenPlug/api
       BLUEPLUG_API_URL: https://davinci.softlab.ntua.gr/saas26/bluePlug/api
+      REDPLUG_API_KEY: "sk_saas_5dec282b47047b6eced41e64"
+      GREENPLUG_API_KEY: "sk_saas_5dec282b47047b6eced41e64"
+      BLUEPLUG_API_KEY: "sk_saas_5dec282b47047b6eced41e64"
     depends_on:
       rabbitmq:
         condition: service_healthy
@@ -282,10 +285,13 @@ services:
       DB_PASSWORD: billing_pass
       DB_NAME: billing_db
       MESSAGE_BROKER_URL: http://message-broker:3003
+      RABBITMQ_URL: amqp://guest:guest@rabbitmq:5672
     depends_on:
       message-broker:
         condition: service_healthy
       mariadb-billing:
+        condition: service_healthy
+      rabbitmq:
         condition: service_healthy
     networks:
       - saasplug-network
@@ -376,8 +382,11 @@ services:
       DB_USER: provider_user
       DB_PASSWORD: provider_pass
       DB_NAME: provider_db
+      RABBITMQ_URL: amqp://guest:guest@rabbitmq:5672
     depends_on:
       mariadb-provider:
+        condition: service_healthy
+      rabbitmq:
         condition: service_healthy
     networks:
       - saasplug-network
@@ -469,10 +478,13 @@ services:
       DB_PASSWORD: analytics_pass
       DB_NAME: analytics_db
       MESSAGE_BROKER_URL: http://message-broker:3003
+      RABBITMQ_URL: amqp://guest:guest@rabbitmq:5672
     depends_on:
       message-broker:
         condition: service_healthy
       mariadb-analytics:
+        condition: service_healthy
+      rabbitmq:
         condition: service_healthy
     networks:
       - saasplug-network

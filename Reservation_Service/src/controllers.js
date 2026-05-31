@@ -1,31 +1,29 @@
 /**
  * Controllers - Provider Adapter Logic
- * 
- * Maps unified reservation request to provider-specific APIs:
- * - redPlug: POST /redPlug/api/reserve/{pointid}/{minutes}
- * - greenPlug: POST /greenPlug/api/chargingPoints/{pointid}/reservations
- * - bluePlug: POST /bluePlug/api/location/{pointid}/hold?minutes={minutes}
+ * * Maps unified reservation request to provider-specific APIs
  */
 
 const axios = require('axios');
 const { logReservation } = require('./db');
 
+// Διορθώθηκαν τα ονόματα των μεταβλητών για να ταιριάζουν με το docker-compose
+// και προστέθηκαν τα πραγματικά default URLs του εργαστηρίου!
 const PROVIDER_CONFIG = {
   redPlug: {
     id: 1,
-    baseUrl: process.env.REDPLUG_BASE_URL || 'http://localhost:8001',
+    baseUrl: process.env.REDPLUG_API_URL || 'https://davinci.softlab.ntua.gr/saas26/redPlug/api',
     apiKey: process.env.REDPLUG_API_KEY || 'redplug-key-123',
     timeout: 10000
   },
   greenPlug: {
     id: 2,
-    baseUrl: process.env.GREENPLUG_BASE_URL || 'http://localhost:8002',
+    baseUrl: process.env.GREENPLUG_API_URL || 'https://davinci.softlab.ntua.gr/saas26/greenPlug/api',
     apiKey: process.env.GREENPLUG_API_KEY || 'greenplug-key-123',
     timeout: 10000
   },
   bluePlug: {
     id: 3,
-    baseUrl: process.env.BLUEPLUG_BASE_URL || 'http://localhost:8003',
+    baseUrl: process.env.BLUEPLUG_API_URL || 'https://davinci.softlab.ntua.gr/saas26/bluePlug/api',
     apiKey: process.env.BLUEPLUG_API_KEY || 'blueplug-key-123',
     timeout: 10000
   }
@@ -33,13 +31,11 @@ const PROVIDER_CONFIG = {
 
 /**
  * Create Reservation - Main controller
- * Maps unified API to provider-specific endpoints
  */
 async function createReservation(params) {
   const { reservationId, providerName, pointId, duration, userId } = params;
 
   try {
-    // Validate provider
     if (!PROVIDER_CONFIG[providerName]) {
       throw new Error(`Unknown provider: ${providerName}`);
     }
@@ -79,7 +75,6 @@ async function createReservation(params) {
   } catch (error) {
     console.error(`[${providerName}] Reservation failed:`, error.message);
 
-    // Log failed reservation
     try {
       const config = PROVIDER_CONFIG[providerName];
       await logReservation({
@@ -107,17 +102,16 @@ async function createReservation(params) {
 
 /**
  * RedPlug Adapter
- * Endpoint: POST /redPlug/api/reserve/{pointid}/{minutes}
- * Minutes in URL path
+ * Διορθωμένο endpoint (χωρίς το περιττό /redPlug/api)
  */
 async function reserveRedPlug(config, pointId, duration) {
-  const url = `${config.baseUrl}/redPlug/api/reserve/${pointId}/${duration}`;
+  const url = `${config.baseUrl}/reserve/${pointId}/${duration}`;
 
   console.log(`[redPlug] Calling: POST ${url}`);
 
   const response = await axios.post(
     url,
-    {}, // empty body
+    {}, 
     {
       headers: {
         'Authorization': `Bearer ${config.apiKey}`,
@@ -127,7 +121,6 @@ async function reserveRedPlug(config, pointId, duration) {
     }
   );
 
-  // RedPlug response format (from OpenAPI)
   return {
     provider: 'redPlug',
     pointid: response.data.pointid,
@@ -142,17 +135,16 @@ async function reserveRedPlug(config, pointId, duration) {
 
 /**
  * GreenPlug Adapter
- * Endpoint: POST /greenPlug/api/chargingPoints/{pointid}/reservations
- * Duration in JSON body: { "duration": minutes }
+ * Διορθωμένο endpoint
  */
 async function reserveGreenPlug(config, pointId, duration) {
-  const url = `${config.baseUrl}/greenPlug/api/chargingPoints/${pointId}/reservations`;
+  const url = `${config.baseUrl}/chargingPoints/${pointId}/reservations`;
 
   console.log(`[greenPlug] Calling: POST ${url} with duration=${duration}`);
 
   const response = await axios.post(
     url,
-    { duration }, // duration in body
+    { duration }, 
     {
       headers: {
         'Authorization': `Bearer ${config.apiKey}`,
@@ -162,7 +154,6 @@ async function reserveGreenPlug(config, pointId, duration) {
     }
   );
 
-  // GreenPlug response format (from OpenAPI)
   return {
     provider: 'greenPlug',
     id: response.data.id,
@@ -178,17 +169,16 @@ async function reserveGreenPlug(config, pointId, duration) {
 
 /**
  * BluePlug Adapter
- * Endpoint: POST /bluePlug/api/location/{pointid}/hold?minutes={minutes}
- * Minutes as query parameter
+ * Διορθωμένο endpoint
  */
 async function reserveBluePlug(config, pointId, duration) {
-  const url = `${config.baseUrl}/bluePlug/api/location/${pointId}/hold?minutes=${duration}`;
+  const url = `${config.baseUrl}/location/${pointId}/hold?minutes=${duration}`;
 
   console.log(`[bluePlug] Calling: POST ${url}`);
 
   const response = await axios.post(
     url,
-    {}, // empty body
+    {}, 
     {
       headers: {
         'Authorization': `Bearer ${config.apiKey}`,
@@ -198,7 +188,6 @@ async function reserveBluePlug(config, pointId, duration) {
     }
   );
 
-  // BluePlug response format (from OpenAPI)
   return {
     provider: 'bluePlug',
     chargerId: response.data.chargerId,
