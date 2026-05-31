@@ -1,6 +1,5 @@
 import { useState, useEffect } from 'react';
-import axios from 'axios';
-import { BASE_URL } from '../config';
+import { reservationAPI } from '../utils/apiClient';
 import MapView from '../components/MapView';
 import InfoPanel from '../components/InfoPanel';
 import Sidebar from '../components/Sidebar';
@@ -139,30 +138,68 @@ const EVUserMap = ({ setToken }) => {
     }
   };
 
-  // Fetch Data
+  // Fetch Data from Reservation Service
   useEffect(() => {
     const fetchData = async () => {
       try {
-        const params = {
-          lat: userLocation[0],
-          lon: userLocation[1]
-        };
-        
-        if (filters.dist < 100) {
-          params.max_distance_km = filters.dist;
-        }
+        const result = await reservationAPI.getAll();
+        const reservations = Array.isArray(result.data?.reservations)
+          ? result.data.reservations
+          : Array.isArray(result.data)
+            ? result.data
+            : [];
 
-        const token = localStorage.getItem('token');
-        const res = await axios.get(`${BASE_URL}/ui/locations`, {
-          params,
-          headers: token ? { Authorization: `Bearer ${token}` } : {}
-        });
-        const normalized = normalizePoints(res.data, userLocation).map((location) => ({
-          ...location,
-          charger_type: (location.cap || 0) <= 22 ? 'AC' : 'DC'
-        }));
-        setChargers(normalized);
-      } catch (err) { console.error(err); }
+        if (result.success) {
+          const normalized = reservations.map((point) => {
+            const location = point.reservation_details || point.location || {};
+            const latitude = location.latitude || location.lat || point.lat || 37.9755;
+            const longitude = location.longitude || location.lon || point.lon || 23.7348;
+            const outlets = Array.isArray(point.outlets) ? point.outlets : (location.outlets ? location.outlets : []);
+            const price = point.pricePerKwh || location.pricePerKwh || location.kwhprice || point.kwhprice || 0.45;
+            const cap = point.power || location.kwh || location.cap || 22;
+            const providerName = point.providerName || point.provider_name || location.providerName || 'Provider';
+
+            return {
+              pointid: String(point.unifiedPointId || point.point_id || point.id || Math.random()),
+              lat: parseFloat(latitude),
+              lon: parseFloat(longitude),
+              name: point.name || `${providerName} ${point.point_id || point.id || ''}`.trim(),
+              address: point.address || location.address || '',
+              connector_types: outlets.length > 0 ? outlets.map((o) => o.connector_type || o.type || 'Type 2') : ['Type 2'],
+              kwhprice: price,
+              cap,
+              distance: calculateDistance(userLocation[0], userLocation[1], parseFloat(latitude), parseFloat(longitude)),
+              outlets: outlets.length > 0 ? outlets.map((outlet) => ({
+                outlet_id: outlet.outlet_id || outlet.id || point.point_id,
+                connector_type: outlet.connector_type || outlet.type || 'Type 2',
+                kilowatts: outlet.kilowatts || outlet.power || cap,
+                status: outlet.status || point.status || point.currentStatus || 'available',
+                kwhprice: outlet.kwhprice || outlet.pricePerKwh || price
+              })) : [{
+                outlet_id: point.point_id || point.id || `${providerName}-${Math.random()}`,
+                connector_type: point.connector_types?.[0] || 'Type 2',
+                kilowatts: cap,
+                status: point.status || point.currentStatus || 'available',
+                kwhprice: price
+              }],
+              currentStatus: point.status || point.currentStatus || 'available',
+              providerName,
+              reservationEndTime: point.reservationEndTime || point.reservedUntil || location.reservationEndTime
+            };
+          }).map((location) => ({
+            ...location,
+            charger_type: (location.cap || 0) <= 22 ? 'AC' : 'DC'
+          }));
+
+          setChargers(normalized);
+        } else {
+          console.warn('Could not load reservation points:', result.error);
+          setChargers([]);
+        }
+      } catch (err) {
+        console.error('Error fetching from Reservation Service:', err);
+        setChargers([]);
+      }
     };
     fetchData();
   }, [userLocation, filters]);
