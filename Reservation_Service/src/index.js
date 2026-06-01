@@ -84,9 +84,13 @@ app.post('/api/reserve', async (req, res) => {
     console.log(`[RESERVE] Success: ${reservationId}`);
 
     // Get provider ID for event publishing
-    let providerId = 1; 
+    let providerId = 1;
     if (providerName === 'greenPlug') providerId = 2;
     if (providerName === 'bluePlug') providerId = 3;
+
+    const reservationDetails = result.data;
+    const reservationEndTime = reservationDetails?.reservationendtime || reservationDetails?.reservedUntil || reservationDetails?.reservationEnd || reservationDetails?.reservation_end_time || null;
+    const reservationStatus = reservationDetails?.status || reservationDetails?.state || reservationDetails?.currentStatus || 'reserved';
 
     // Publish to RabbitMQ (async, non-blocking)
     try {
@@ -96,7 +100,10 @@ app.post('/api/reserve', async (req, res) => {
         providerName,
         pointId,
         duration,
-        timestamp: new Date().toISOString()
+        timestamp: new Date().toISOString(),
+        reservationDetails,
+        reservation_end_time: reservationEndTime,
+        reservation_status: reservationStatus
       });
       console.log(`[RABBITMQ] Event published for reservation ${reservationId}`);
     } catch (rabbitmqError) {

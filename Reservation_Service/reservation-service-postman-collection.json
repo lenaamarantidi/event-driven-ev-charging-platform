@@ -1,0 +1,139 @@
+{
+  "info": {
+    "name": "Reservation Service - saas26-11",
+    "description": "Postman collection for testing the local Reservation Service and provider API key flow.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    {
+      "key": "baseUrl",
+      "value": "http://localhost:3106",
+      "type": "string"
+    },
+    {
+      "key": "apiKey",
+      "value": "sk_saas_replace_me",
+      "type": "string"
+    },
+    {
+      "key": "providerName",
+      "value": "redPlug",
+      "type": "string"
+    },
+    {
+      "key": "pointId",
+      "value": "RED-001",
+      "type": "string"
+    },
+    {
+      "key": "duration",
+      "value": "30",
+      "type": "string"
+    },
+    {
+      "key": "userId",
+      "value": "test-user-123",
+      "type": "string"
+    },
+    {
+      "key": "reservationId",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "redPlugBaseUrl",
+      "value": "https://davinci.softlab.ntua.gr/saas26/redPlug/api",
+      "type": "string"
+    }
+  ],
+  "item": [
+    {
+      "name": "Reservation Service Health Check",
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": {
+          "raw": "{{baseUrl}}/health"
+        }
+      }
+    },
+    {
+      "name": "Create Reservation - redPlug",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"providerName\": \"{{providerName}}\",\n  \"pointId\": \"{{pointId}}\",\n  \"duration\": {{duration}},\n  \"userId\": \"{{userId}}\"\n}"
+        },
+        "url": {
+          "raw": "{{baseUrl}}/api/reserve"
+        }
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "exec": [
+              "const response = pm.response.json();",
+              "if (response.success && response.reservationId) {",
+              "  pm.environment.set('reservationId', response.reservationId);",
+              "  console.log('Saved reservationId:', response.reservationId);",
+              "}",
+              "pm.test('Reservation created successfully', function () {",
+              "  pm.response.to.have.status(200);",
+              "  pm.expect(response.success).to.eql(true);",
+              "  pm.expect(response.reservationId).to.be.a('string');",
+              "});"
+            ],
+            "type": "text/javascript"
+          }
+        }
+      ]
+    },
+    {
+      "name": "List Reservations",
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": {
+          "raw": "{{baseUrl}}/api/reservations"
+        }
+      }
+    },
+    {
+      "name": "Get Reservation by ID",
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": {
+          "raw": "{{baseUrl}}/api/reservations/{{reservationId}}"
+        }
+      }
+    },
+    {
+      "name": "Direct Provider Test - redPlug API Key",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          },
+          {
+            "key": "Authorization",
+            "value": "Bearer {{apiKey}}"
+          }
+        ],
+        "url": {
+          "raw": "{{redPlugBaseUrl}}/reserve/{{pointId}}/{{duration}}"
+        }
+      }
+    }
+  ]
+}

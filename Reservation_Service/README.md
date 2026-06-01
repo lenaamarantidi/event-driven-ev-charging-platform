@@ -333,6 +333,8 @@ BLUEPLUG_API_KEY=your-api-key
 **Postman / API Key instructions**
 
 - Φορτώστε στο Postman τις συλλογές που έχουν δοθεί για την εργασία.
+- Μπορείτε επίσης να εισάγετε απευθείας αυτήν τη συλλογή:
+  - `Reservation_Service/reservation-service-postman-collection.json`
 - Βρείτε τη μεταβλητή `apiKey` στις Postman Variables και αντικαταστήστε το `sk_saas_replace_me` με το API key ομάδας:
 
 ```text

@@ -81,7 +81,10 @@ async function publishReservationEvent(eventData) {
       providerName,
       pointId,
       duration,
-      timestamp
+      timestamp,
+      reservationDetails,
+      reservation_end_time,
+      reservation_status
     } = eventData;
 
     const message = {
@@ -94,11 +97,16 @@ async function publishReservationEvent(eventData) {
         providerName,
         pointId,
         duration,
+        reservation_end_time,
+        reservation_status,
+        reservationDetails,
         event_metadata: {
           reservation_id: reservationId,
           provider_id: providerId,
           point_id: pointId,
-          duration_minutes: duration
+          duration_minutes: duration,
+          reservation_end_time,
+          reservation_status
         }
       }
     };
