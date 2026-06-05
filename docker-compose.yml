@@ -423,6 +423,24 @@ services:
       - saasplug-network
     restart: unless-stopped
 
+  # API Gateway
+  api-gateway:
+    build:
+      context: ./API_Gateway
+    container_name: saasplug-api-gateway
+    ports:
+      - "8000:8000"
+    environment:
+      PORT: 8000
+      NODE_ENV: production
+      AUTH_SERVICE_URL: http://auth-service:3100
+    depends_on:
+      auth-service:
+        condition: service_started
+    networks:
+      - saasplug-network
+    restart: unless-stopped
+
   # MariaDB for Analytics Service
   mariadb-analytics:
     image: mariadb:11
