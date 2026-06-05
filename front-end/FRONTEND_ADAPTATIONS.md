@@ -345,9 +345,358 @@ The `EVUserMap` component normalizes charging point data from providers:
 export const BASE_URL = "http://127.0.0.1:9876/api";
 ```
 
-### Expected Endpoints
+---
 
-#### UC01 (EV User Map)
+## API Integration - Updated Microservices Architecture
+
+### Configuration Structure
+```javascript
+// src/config.js
+export const SERVICES = {
+  providers: 'http://127.0.0.1:3105/api',    // Provider Management Service (UC03)
+  analytics: 'http://127.0.0.1:3102/api',    // Analytics Service (UC04)
+  billing: 'http://127.0.0.1:3103/api',      // Billing Service (UC05)
+  reservations: 'http://127.0.0.1:3106/api'  // Reservation Service (UC01 - unified)
+};
+```
+
+### API Client Organization
+```
+src/utils/
+├── apiClient.js              # Centralized API client for all 4 services
+├── providerDataMapper.js     # Anti-corruption layer for provider normalization
+└── (implicitly: config.js)
+```
+
+### Unified API Endpoints
+
+#### 1. Reservation Service (Port 3106) - UC01
+**Purpose**: Unified reservation endpoint for all providers (redPlug, greenPlug, bluePlug)
+
+**Endpoints**:
+```
+POST   /api/reserve              # Create reservation (unified for all providers)
+GET    /api/reservations         # List all reservations
+GET    /api/reservations/:id     # Get specific reservation details
+GET    /health                   # Health check
+```
+
+**Usage in EVUserMap.jsx**:
+```javascript
+import { reservationAPI } from '../utils/apiClient';
+
+// Get all reservations/points
+const result = await reservationAPI.getAll();
+
+// Create new reservation
+const result = await reservationAPI.createReservation({
+  providerName: 'redPlug',      // or 'greenPlug', 'bluePlug'
+  pointId: '123',
+  duration: 120,                 // minutes
+  userId: 'user123'
+});
+```
+
+**Response Normalization** (via ProviderDataMapper):
+```javascript
+import ProviderDataMapper from '../utils/providerDataMapper';
+
+// Auto-normalize from any provider format
+const unified = ProviderDataMapper.normalizePoint(providerData, 'redPlug');
+
+// Returns UnifiedPoint:
+{
+  unifiedPointId,
+  providerName,
+  currentStatus,
+  reservationEndTime,
+  pricePerKwh,
+  coordinates: { longitude, latitude }
+}
+```
+
+#### 2. Provider Management Service (Port 3105) - UC03
+**Purpose**: Provider registration and management
+
+**Endpoints**:
+```
+POST   /api/providers/register   # Register new EV provider
+GET    /api/providers            # List all providers
+GET    /api/providers/:id        # Get provider details
+POST   /api/providers/:id/suspend # Suspend provider
+```
+
+**Usage in OperatorDashboard.jsx**:
+```javascript
+import { providerAPI } from '../utils/apiClient';
+
+// Register new provider
+const result = await providerAPI.register({
+  provider_name: 'NewProvider',
+  base_url: 'https://api.newprovider.com',
+  api_key: 'secret-key-123',
+  endpoint_list_points: '/points',
+  endpoint_point_details: '/points/:id',
+  endpoint_reserve: '/reserve',
+  endpoint_reserve_duration: '/reserve/duration'
+});
+
+// Get all providers
+const providers = await providerAPI.getAll();
+
+// Get specific provider
+const provider = await providerAPI.getById(providerId);
+```
+
+#### 3. Analytics Service (Port 3102) - UC04
+**Purpose**: Provider analytics and system-wide metrics
+
+**Endpoints**:
+```
+GET    /api/analytics/provider/:providerId?period=monthly&from=DATE&to=DATE
+GET    /api/analytics/provider/:providerId/daily
+GET    /api/analytics/global?period=monthly
+GET    /health
+```
+
+**Usage in ProviderDashboard.jsx**:
+```javascript
+import { analyticsAPI } from '../utils/apiClient';
+
+// Provider-specific analytics (monthly)
+const analytics = await analyticsAPI.getProviderAnalytics(providerId, { 
+  period: 'monthly',
+  from: '2024-01-01',
+  to: '2024-01-31'
+});
+
+// Provider daily analytics
+const daily = await analyticsAPI.getDailyAnalytics(providerId);
+
+// System-wide analytics (for Operator)
+const global = await analyticsAPI.getGlobalAnalytics('monthly');
+```
+
+**Usage in OperatorDashboard.jsx**:
+```javascript
+import { analyticsAPI } from '../utils/apiClient';
+
+// Get global system metrics
+const metrics = await analyticsAPI.getGlobalAnalytics('monthly');
+```
+
+**Response Structure**:
+```javascript
+{
+  provider_id: 123,
+  period: 'monthly',
+  date_range: { from: '2024-01-01', to: '2024-01-31' },
+  stats: {
+    searches: 150,
+    point_views: 320,
+    reservations: 45
+  },
+  daily_data: [...]
+}
+```
+
+#### 4. Billing Service (Port 3103) - UC05
+**Purpose**: Invoice generation and billing management
+
+**Endpoints**:
+```
+GET    /api/billing/invoice/:providerId
+GET    /api/billing/invoices/:providerId?limit=12
+POST   /api/billing/invoices/:providerId/:invoiceId/mark-paid
+GET    /api/billing/summary/:providerId
+GET    /health
+```
+
+**Usage in ProviderDashboard.jsx**:
+```javascript
+import { billingAPI } from '../utils/apiClient';
+
+// Get current month invoice
+const invoice = await billingAPI.getInvoice(providerId);
+
+// Get invoice history (last 12)
+const history = await billingAPI.getInvoiceHistory(providerId, 12);
+
+// Mark invoice as paid
+const result = await billingAPI.markInvoiceAsPaid(providerId, invoiceId);
+
+// Get billing summary
+const summary = await billingAPI.getSummary(providerId);
+```
+
+**Response Structure**:
+```javascript
+{
+  invoice_id: 'INV-2024-001',
+  provider_id: 123,
+  billing_period_start: '2024-01-01',
+  billing_period_end: '2024-01-31',
+  total_amount: 1500.50,
+  tax_amount: 315.10,
+  grand_total: 1815.60,
+  due_date: '2024-02-28',
+  event_count: 45,
+  status: 'draft'
+}
+```
+
+---
+
+## Microservice Configuration
+
+### Environment Variables (for backend)
+```env
+# Provider Management Service
+PROVIDER_MANAGEMENT_PORT=3105
+PROVIDER_MANAGEMENT_DB=providers_db
+
+# Analytics Service
+ANALYTICS_PORT=3102
+ANALYTICS_DB=analytics_db
+
+# Billing Service
+BILLING_PORT=3103
+BILLING_DB=billing_db
+
+# Reservation Service
+RESERVATION_PORT=3106
+RESERVATION_DB=reservations_db
+REDPLUG_BASE_URL=http://localhost:8001
+GREENPLUG_BASE_URL=http://localhost:8002
+BLUEPLUG_BASE_URL=http://localhost:8003
+```
+
+---
+
+## Frontend State Management
+
+### Provider Context (future enhancement)
+```javascript
+// Redux or Context API for global state
+{
+  auth: { token, userId, userRole },
+  provider: { providerId, name, analytics },
+  system: { globalMetrics, alerts },
+  reservations: { list, selected },
+  ui: { loading, error }
+}
+```
+
+---
+
+## Error Handling & Fallbacks
+
+### API Client Error Handling
+```javascript
+// All API calls return:
+{
+  success: boolean,
+  data: object | array,
+  error?: string
+}
+
+// Usage:
+const result = await analyticsAPI.getProviderAnalytics(providerId);
+if (!result.success) {
+  console.error('Analytics error:', result.error);
+  // Show user-friendly error message
+}
+```
+
+### Retry Logic (implemented in apiClient.js)
+- Timeout: 10 seconds
+- Retries: 3 attempts
+- Delay between retries: 1 second
+
+---
+
+## Compatibility Verification
+
+### Architecture Alignment ✅
+- **Event-driven architecture**: ✅ RabbitMQ integration in backend
+- **Async communication**: ✅ Message broker patterns
+- **Database**: ✅ MariaDB (NOT SQLite)
+- **Microservices**: ✅ 4 independent services with defined contracts
+- **Anti-corruption layer**: ✅ ProviderDataMapper normalizes heterogeneous APIs
+
+### Role-Based Access Control ✅
+- **ev_user**: Can search, filter, and reserve charging points
+- **provider**: Can view analytics, billing, and manage stations
+- **operator**: Can view global metrics, manage providers, monitor system
+- **admin**: Full platform access (future)
+
+### API Endpoint Compatibility ✅
+- EVUserMap (UC01): Reservation Service `/api/reserve` ✅
+- ProviderDashboard (UC03/04/08):
+  - Analytics Service `/api/analytics/provider/:providerId` ✅
+  - Billing Service `/api/billing/summary/:providerId` ✅
+- OperatorDashboard (UC06):
+  - Analytics Service `/api/analytics/global` ✅
+  - Provider Management `/api/providers` ✅
+
+### Data Flow Verification ✅
+```
+Frontend
+  ↓ UC01 (EV User)
+Reservation Service (3106)
+  ↓ Creates reservation
+Event Broker (RabbitMQ)
+  ├→ Analytics Service (3102) - tracks events
+  ├→ Billing Service (3103) - generates charges
+  └→ Provider adapters - calls external APIs
+```
+
+---
+
+## Previous Endpoints (Deprecated)
+
+### Legacy API Gateway (Port 9876)
+The following endpoints are **NO LONGER USED** and have been replaced:
+
+```javascript
+// OLD - DO NOT USE
+GET    /api/ui/locations           → NOW: GET /api/reservations (Reservation Service 3106)
+GET    /api/provider/stations      → NOW: GET /api/analytics/provider/:id/daily (Analytics Service 3102)
+GET    /api/provider/analytics     → NOW: GET /api/analytics/provider/:id (Analytics Service 3102)
+GET    /api/provider/reservations  → NOW: GET /api/reservations (Reservation Service 3106)
+GET    /api/operator/metrics       → NOW: GET /api/analytics/global (Analytics Service 3102)
+GET    /api/operator/providers     → NOW: GET /api/providers (Provider Management 3105)
+GET    /api/operator/alerts        → NOW: Simulated in OperatorDashboard.jsx
+POST   /api/auth/login             → Auth Service (separate, existing)
+```
+
+---
+
+## Implementation Summary
+
+✅ **config.js** - Updated with service-specific URLs
+✅ **utils/apiClient.js** - New centralized API client
+✅ **utils/providerDataMapper.js** - Anti-corruption layer wrapper
+✅ **EVUserMap.jsx** - Updated to use Reservation Service
+✅ **ProviderDashboard.jsx** - Updated to use Analytics & Billing Services
+✅ **OperatorDashboard.jsx** - Updated to use Analytics & Provider Management
+✅ **FRONTEND_ADAPTATIONS.md** - This document
+
+---
+
+## Testing Checklist
+
+- [ ] Start all 4 microservices
+- [ ] Test EVUserMap - verify reservations load
+- [ ] Test ProviderDashboard - verify analytics and billing data
+- [ ] Test OperatorDashboard - verify global metrics and provider list
+- [ ] Verify error handling for service timeouts
+- [ ] Verify data normalization from different providers
+- [ ] Test authentication headers with bearer tokens
+- [ ] Verify responsive design (mobile & desktop)
+- [ ] Test API fallbacks and error states
+
+---
 ```
 GET /api/ui/locations?lat=37.97&lon=23.73&max_distance_km=50
 POST /api/auth/login

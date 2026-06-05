@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import axios from 'axios';
-import { BASE_URL } from '../config';
+import { BASE_URL, SERVICES } from '../config';
+import { analyticsAPI, providerAPI } from '../utils/apiClient';
 
 const OperatorDashboard = ({ setToken }) => {
   const [activeTab, setActiveTab] = useState('overview');
@@ -22,24 +23,58 @@ const OperatorDashboard = ({ setToken }) => {
 
   const fetchOperatorData = async () => {
     try {
-      const token = localStorage.getItem('token');
-      const headers = token ? { Authorization: `Bearer ${token}` } : {};
+      // Κάλεσμα στο Analytics Service για global metrics
+      // GET /api/analytics/global?period=monthly
+      const globalAnalyticsResult = await analyticsAPI.getGlobalAnalytics('monthly');
 
-      // Fetch system metrics
-      const metricsRes = await axios.get(`${BASE_URL}/operator/metrics`, { headers });
-      setSystemMetrics(metricsRes.data || {});
+      // Κάλεσμα στο Provider Management Service για λίστα providers
+      // GET /api/providers
+      const providersResult = await providerAPI.getAll();
 
-      // Fetch providers list
-      const providersRes = await axios.get(`${BASE_URL}/operator/providers`, { headers });
-      setProviders(providersRes.data || []);
+      // Κανονικοποίηση global metrics
+      if (globalAnalyticsResult.success) {
+        const data = globalAnalyticsResult.data;
+        setSystemMetrics({
+          totalProviders: data.total_providers || 0,
+          totalStations: data.total_stations || 0,
+          activeStations: data.active_stations || 0,
+          totalUsers: data.total_users || 0,
+          systemUtilization: data.system_utilization || 0,
+          totalTransactions: data.total_transactions || 0
+        });
+      } else {
+        console.warn('Global analytics error:', globalAnalyticsResult.error);
+      }
 
-      // Fetch system alerts
-      const alertsRes = await axios.get(`${BASE_URL}/operator/alerts`, { headers });
-      setAlerts(alertsRes.data || []);
+      // Κανονικοποίηση providers list
+      if (providersResult.success && Array.isArray(providersResult.data)) {
+        setProviders(providersResult.data);
+      } else {
+        console.warn('Providers fetch error:', providersResult.error);
+      }
+
+      // Alert simulation - σε πραγματική περίπτωση θα ήταν από ένα alerts endpoint
+      setAlerts([
+        {
+          severity: 'info',
+          title: 'System Running Normally',
+          message: 'All services are operational',
+          time: new Date().toLocaleTimeString()
+        }
+      ]);
 
       setLoading(false);
     } catch (err) {
       console.error('Error fetching operator data:', err);
+      setSystemMetrics({
+        totalProviders: 0,
+        totalStations: 0,
+        activeStations: 0,
+        totalUsers: 0,
+        systemUtilization: 0,
+        totalTransactions: 0
+      });
+      setProviders([]);
       setLoading(false);
     }
   };

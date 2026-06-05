@@ -1,6 +1,6 @@
 services:
   points-green-service:
-    build: .
+    image: points_service:latest
     container_name: points-green-service
     ports:
       - "${POINTS_GREEN_PORT}:${POINTS_GREEN_PORT}"
@@ -15,7 +15,7 @@ services:
       - "host.docker.internal:host-gateway"
 
   points-red-service:
-    build: .
+    image: points_service:latest
     container_name: points-red-service
     ports:
       - "${POINTS_RED_PORT}:${POINTS_RED_PORT}"
@@ -30,7 +30,7 @@ services:
       - "host.docker.internal:host-gateway"
 
   points-blue-service:
-    build: .
+    image: points_service:latest
     container_name: points-blue-service
     ports:
       - "${POINTS_BLUE_PORT}:${POINTS_BLUE_PORT}"
@@ -45,7 +45,7 @@ services:
       - "host.docker.internal:host-gateway"
 
   points-central-service:
-    build: .
+    image: points_service:latest
     container_name: points-central-service
     ports:
       - "${POINTS_CENTRAL_PORT}:${POINTS_CENTRAL_PORT}"

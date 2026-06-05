@@ -84,12 +84,12 @@ export POINTS_RED_SERVICE=points-red-service
 export POINTS_BLUE_SERVICE=points-blue-service
 export POINTS_CENTRAL_SERVICE=points-central-service
 
-export POINTS_GREEN_MARIADB_PORT=${ports[1]}
-export POINTS_RED_MARIADB_PORT=${ports[0]}
+export POINTS_GREEN_MARIADB_PORT=${ports[0]}
+export POINTS_RED_MARIADB_PORT=${ports[1]}
 export POINTS_BLUE_MARIADB_PORT=${ports[2]}
 export POINTS_CENTRAL_MARIADB_PORT=${ports[3]}
 
-export MARIADB_HOST=localhost
+export MARIADB_HOST=host.docker.internal
 export BEARER_TOKEN=sk_saas_5dec282b47047b6eced41e64
 
 docker compose -f docker-compose.points.services.yml up -d

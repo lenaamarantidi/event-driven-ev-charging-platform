@@ -1,6 +1,8 @@
 import { useState, useEffect } from 'react';
 import axios from 'axios';
-import { BASE_URL } from '../config';
+import { BASE_URL, SERVICES } from '../config';
+import { reservationAPI } from '../utils/apiClient';
+import ProviderDataMapper from '../utils/providerDataMapper';
 import MapView from '../components/MapView';
 import InfoPanel from '../components/InfoPanel';
 import Sidebar from '../components/Sidebar';
@@ -139,30 +141,46 @@ const EVUserMap = ({ setToken }) => {
     }
   };
 
-  // Fetch Data
+  // Fetch Data from Reservation Service
   useEffect(() => {
     const fetchData = async () => {
       try {
-        const params = {
-          lat: userLocation[0],
-          lon: userLocation[1]
-        };
+        // Κάλεσμα στο Reservation_Service για όλες τις κρατήσεις/σημεία
+        const result = await reservationAPI.getAll();
         
-        if (filters.dist < 100) {
-          params.max_distance_km = filters.dist;
+        if (result.success && Array.isArray(result.data)) {
+          // Κανονικοποίηση responses χρησιμοποιώντας ProviderDataMapper
+          // Το Reservation_Service επιστρέφει ενοποιημένα σημεία ήδη
+          const normalized = result.data.map((point) => ({
+            pointid: String(point.unifiedPointId || point.id || Math.random()),
+            lat: point.coordinates?.latitude || point.lat || 37.9755,
+            lon: point.coordinates?.longitude || point.lon || 23.7348,
+            name: point.name || `${point.providerName} ${point.unifiedPointId}`,
+            address: point.address || '',
+            connector_types: point.connector_types || ['Type 2'],
+            kwhprice: point.pricePerKwh || 0.45,
+            cap: point.power || 22,
+            distance: calculateDistance(userLocation[0], userLocation[1], 
+                                       point.coordinates?.latitude || 37.9755,
+                                       point.coordinates?.longitude || 23.7348),
+            outlets: point.outlets || [],
+            currentStatus: point.currentStatus,
+            providerName: point.providerName,
+            reservationEndTime: point.reservationEndTime
+          })).map((location) => ({
+            ...location,
+            charger_type: (location.cap || 0) <= 22 ? 'AC' : 'DC'
+          }));
+          
+          setChargers(normalized);
+        } else {
+          console.warn('Δεν ήταν δυνατή η ανάκτηση σημείων:', result.error);
+          setChargers([]);
         }
-
-        const token = localStorage.getItem('token');
-        const res = await axios.get(`${BASE_URL}/ui/locations`, {
-          params,
-          headers: token ? { Authorization: `Bearer ${token}` } : {}
-        });
-        const normalized = normalizePoints(res.data, userLocation).map((location) => ({
-          ...location,
-          charger_type: (location.cap || 0) <= 22 ? 'AC' : 'DC'
-        }));
-        setChargers(normalized);
-      } catch (err) { console.error(err); }
+      } catch (err) {
+        console.error('Error fetching from Reservation Service:', err);
+        setChargers([]);
+      }
     };
     fetchData();
   }, [userLocation, filters]);

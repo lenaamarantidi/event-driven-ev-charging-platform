@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import axios from 'axios';
-import { BASE_URL } from '../config';
+import { BASE_URL, SERVICES } from '../config';
+import { analyticsAPI, billingAPI } from '../utils/apiClient';
 
 const ProviderDashboard = ({ setToken }) => {
   const [activeTab, setActiveTab] = useState('overview');
@@ -21,20 +22,48 @@ const ProviderDashboard = ({ setToken }) => {
 
   const fetchProviderData = async () => {
     try {
-      const token = localStorage.getItem('token');
-      const headers = token ? { Authorization: `Bearer ${token}` } : {};
+      // Λήψη provider ID από token ή session
+      const providerId = localStorage.getItem('providerId') || '1'; // Default fallback
+      
+      // Κάλεσμα στο Analytics Service
+      // GET /api/analytics/provider/:providerId?period=monthly
+      const analyticsResult = await analyticsAPI.getProviderAnalytics(providerId, { period: 'monthly' });
+      
+      // Κάλεσμα στο Billing Service
+      // GET /api/billing/summary/:providerId
+      const billingResult = await billingAPI.getSummary(providerId);
 
-      // Fetch provider's stations
-      const stationsRes = await axios.get(`${BASE_URL}/provider/stations`, { headers });
-      setStations(stationsRes.data || []);
+      // Κανονικοποίηση δεδομένων analytics
+      if (analyticsResult.success) {
+        const analyticsData = analyticsResult.data;
+        setAnalytics({
+          totalStations: analyticsData.stations_count || 0,
+          activeStations: analyticsData.active_stations || 0,
+          totalReservations: analyticsData.reservations || 0,
+          revenue: billingResult.success ? billingResult.data.total_revenue || 0 : 0,
+          utilization: analyticsData.utilization_rate || 0
+        });
+      } else {
+        console.warn('Analytics error:', analyticsResult.error);
+      }
 
-      // Fetch provider analytics
-      const analyticsRes = await axios.get(`${BASE_URL}/provider/analytics`, { headers });
-      setAnalytics(analyticsRes.data || {});
+      // Κάλεσμα για λήψη σταθμών (stations)
+      // Μπορούμε να χρησιμοποιήσουμε ημερήσια analytics για stations data
+      const dailyResult = await analyticsAPI.getDailyAnalytics(providerId);
+      if (dailyResult.success) {
+        setStations(dailyResult.data || []);
+      }
 
       setLoading(false);
     } catch (err) {
       console.error('Error fetching provider data:', err);
+      setAnalytics({
+        totalStations: 0,
+        activeStations: 0,
+        totalReservations: 0,
+        revenue: 0,
+        utilization: 0
+      });
       setLoading(false);
     }
   };
