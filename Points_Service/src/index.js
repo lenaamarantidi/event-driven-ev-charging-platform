@@ -67,11 +67,47 @@ async function initializeDatabase() {
 
 initializeDatabase();
 
-// ============== PROVIDER MAPPING ==============
+// ============== PROVIDER ADAPTER CONFIG (per-provider services) ==============
 
-const { PROVIDER_MAP } = require('./plugs_api');
-const { buildProviderUrl } = require('./plugs_api');
-const { normalizePoint } = require('./plugs_api');
+const PROVIDER_ADAPTER_URLS = {
+  redPlug: process.env.REDPLUG_ADAPTER_URL || 'http://localhost:3111',
+  greenPlug: process.env.GREENPLUG_ADAPTER_URL || 'http://localhost:3112',
+  bluePlug: process.env.BLUEPLUG_ADAPTER_URL || 'http://localhost:3113'
+};
+
+function getProviderFromServiceEnv() {
+  const service = process.env.SERVICE;
+  if (!service) throw new Error("Missing process.env.SERVICE. Provide a plug name (red/green/blue)");
+  const s = String(service).toLowerCase();
+  if (s.includes('green')) return 'greenPlug';
+  if (s.includes('red')) return 'redPlug';
+  if (s.includes('blue')) return 'bluePlug';
+  throw new Error(`Invalid process.env.SERVICE='${service}'. Expected a plug identifier containing one of: red, green, blue`);
+}
+
+function getAdapterBaseUrl(provider) {
+  const url = PROVIDER_ADAPTER_URLS[provider];
+  if (!url) throw new Error(`No adapter url configured for provider: ${provider}`);
+  return url;
+}
+
+async function fetchProviderPoints(provider) {
+  const base = getAdapterBaseUrl(provider);
+  const resp = await axios.get(`${base}/api/points`, { timeout: 10000 });
+  return resp.data.points || resp.data || [];
+}
+
+async function fetchProviderPoint(provider, pointId) {
+  const base = getAdapterBaseUrl(provider);
+  const resp = await axios.get(`${base}/api/points/${encodeURIComponent(pointId)}`, { timeout: 10000 });
+  return resp.data.point || resp.data;
+}
+
+async function reserveProviderPoint(provider, pointId, duration) {
+  const base = getAdapterBaseUrl(provider);
+  const resp = await axios.post(`${base}/api/reserve`, { pointId, duration }, { timeout: 10000 });
+  return resp.data.reservation || resp.data;
+}
 
 // ============== HELPER FUNCTIONS ==============
 const { getAccessibleIps } = require('./util');
@@ -98,32 +134,9 @@ function scheduleReservationExpiry(pointId, reservationEndTime) {
 
           // first get new point status from povider api
           // Get point details from provider API
-          const service = process.env.SERVICE;
-          const s = String(service).toLowerCase();
-          
-          let plugKey;
-          if (s.includes('green')) plugKey = 'greenPlug';
-          else if (s.includes('red')) plugKey = 'redPlug';
-          else if (s.includes('blue')) plugKey = 'bluePlug';
-          else throw new Error('Unknown service');
-
-          const config = PROVIDER_MAP[plugKey];
-          const url = buildProviderUrl(plugKey, "detailPath", pointId);
-
-          const bearerToken = process.env.BEARER_TOKEN;
-          const headers = { Accept: 'application/json' };
-          if (bearerToken) {
-            headers.Authorization = `Bearer ${bearerToken}`;
-          }
-
-          const providerResp = await axios.get(url, {
-            timeout: 10000,
-            headers
-          });
-
-          const pointData = providerResp.data || {};
-          const normalized = normalizePoint(pointData, plugKey);
-          const currentStatus = normalized.status;
+          const service = getProviderFromServiceEnv();
+          const normalized = await fetchProviderPoint(service, pointId);
+          const currentStatus = normalized?.status;
 
           console.log(`📊 Point ${pointId} current status from provider: ${currentStatus}`);
 
@@ -184,8 +197,6 @@ function scheduleReservationExpiry(pointId, reservationEndTime) {
 
 const API_POINTS = '/api/points';
 const API_POINTS_BY_ID = '/api/points/:pointId';
-const API_POINTS_RESERVE = '/api/points/:pointId/reserve';
-const API_POINTS_RESERVE_MINUTES = '/api/points/:pointId/reserve/:minutes';
 
 const PLUGAPI_POINTS = '/plugApi/points';
 const PLUGAPI_POINT = '/plugApi/points/:pointId';
@@ -203,53 +214,9 @@ const HEALTH = '/health';
  */
 app.get(PLUGAPI_POINTS, async (req, res) => {
   try {
-    const service = process.env.SERVICE;
-
-    if (!service) {
-      throw new Error(
-        "Missing process.env.SERVICE. Provide a plug name (red/green/blue) so this endpoint can compute the provider URL. Examples: redPlug, greenPlug, bluePlug"
-      );
-    }
-
-    const s = String(service).toLowerCase();
-
-    let plugKey;
-    if (s.includes('green')) plugKey = 'greenPlug';
-    else if (s.includes('red')) plugKey = 'redPlug';
-    else if (s.includes('blue')) plugKey = 'bluePlug';
-    else if (s.includes('central')) {
-      throw new Error(
-        `process.env.SERVICE='${service}' looks like a central service. Please set process.env.SERVICE to a specific plug: redPlug | greenPlug | bluePlug`
-      );
-    } else {
-      throw new Error(
-        `Invalid process.env.SERVICE='${service}'. Expected a plug identifier containing one of: red, green, blue (e.g. redPlug | greenPlug | bluePlug)`
-      );
-    }
-
-    const url = buildProviderUrl(plugKey, 'listPath', '');
-
-    const bearerToken = process.env.BEARER_TOKEN;
-
-    const requestHeaders = { Accept: 'application/json' };
-    if (bearerToken) {
-      requestHeaders.Authorization = `Bearer ${bearerToken}`;
-    }
-
-    const providerResp = await axios.get(url, {
-      timeout: 10000,
-      headers: requestHeaders,
-    });
-
-    const payload = {
-      service,
-      plugKey,
-      url,
-      data: providerResp.data,
-    };
-
-    console.log('[/db/points] provider json:', payload);
-    return res.json(payload);
+    const service = getProviderFromServiceEnv();
+    const points = await fetchProviderPoints(service);
+    return res.json({ service, provider: service, points });
 
   } catch (err) {
     console.error('Error in /db/points:', err.message);
@@ -260,51 +227,9 @@ app.get(PLUGAPI_POINTS, async (req, res) => {
 app.get(PLUGAPI_POINT, async (req, res) => {
   try {
     const { pointId } = req.params;
-    const service = process.env.SERVICE;
-
-    if (!service) {
-      throw new Error(
-        "Missing process.env.SERVICE. Provide a plug name (red/green/blue)"
-      );
-    }
-
-    const s = String(service).toLowerCase();
-
-    let plugKey;
-    if (s.includes('green')) plugKey = 'greenPlug';
-    else if (s.includes('red')) plugKey = 'redPlug';
-    else if (s.includes('blue')) plugKey = 'bluePlug';
-    else {
-      throw new Error(`Invalid SERVICE: ${service}`);
-    }
-
-    const config = PROVIDER_MAP[plugKey];
-    if (!config) throw new Error(`Unknown provider: ${plugKey}`);
-
-    const url = buildProviderUrl(plugKey, "detailPath", pointId);
-
-    const bearerToken = process.env.BEARER_TOKEN;
-    const requestHeaders = { Accept: 'application/json' };
-    if (bearerToken) {
-      requestHeaders.Authorization = `Bearer ${bearerToken}`;
-    }
-
-    console.log(`📡 Fetching point ${pointId} from ${plugKey}: ${url}`);
-    const providerResp = await axios.get(url, {
-      timeout: 10000,
-      headers: requestHeaders,
-    });
-
-    const payload = {
-      service,
-      plugKey,
-      pointId,
-      url,
-      data: providerResp.data,
-    };
-
-    console.log('[/plugApi/points/:pointId] provider json:', payload);
-    return res.json(payload);
+    const service = getProviderFromServiceEnv();
+    const point = await fetchProviderPoint(service, pointId);
+    return res.json({ service, provider: service, point });
 
   } catch (err) {
     console.error('Error in /plugApi/points/:pointId:', err.message);
@@ -321,40 +246,8 @@ app.get(PLUGAPI_POINT, async (req, res) => {
  */
 app.post(DB_REPOPULATE, async (req, res) => {
   try {
-    const service = process.env.SERVICE;
-    if (!service) {
-      throw new Error(
-        "Missing process.env.SERVICE. Provide a plug name (red/green/blue) so this endpoint can populate the DB. Examples: redPlug, greenPlug, bluePlug"
-      );
-    }
-
-    const s = String(service).toLowerCase();
-
-    let plugKey;
-    if (s.includes('green')) plugKey = 'greenPlug';
-    else if (s.includes('red')) plugKey = 'redPlug';
-    else if (s.includes('blue')) plugKey = 'bluePlug';
-    else if (s.includes('central')) {
-      throw new Error(
-        `process.env.SERVICE='${service}' looks like a central service. Please set process.env.SERVICE to a specific plug: redPlug | greenPlug | bluePlug`
-      );
-    } else {
-      throw new Error(
-        `Invalid process.env.SERVICE='${service}'. Expected a plug identifier containing one of: red, green, blue (e.g. redPlug | greenPlug | bluePlug)`
-      );
-    }
-
-    const url = buildProviderUrl(plugKey, 'listPath', '');
-
-    const bearerToken = process.env.BEARER_TOKEN || process.env.AUTH_TOKEN || process.env.TOKEN;
-    const headers = { Accept: 'application/json' };
-    if (bearerToken) headers.Authorization = `Bearer ${bearerToken}`;
-
-    const providerResp = await axios.get(url, { timeout: 10000, headers });
-
-    let rawPoints = Array.isArray(providerResp.data)
-      ? providerResp.data
-      : providerResp.data.points || providerResp.data;
+    const service = getProviderFromServiceEnv();
+    let rawPoints = await fetchProviderPoints(service);
 
     if (!Array.isArray(rawPoints)) {
       throw new Error('Provider response did not contain an array of points');
@@ -364,7 +257,7 @@ app.post(DB_REPOPULATE, async (req, res) => {
     const { points: filterIds } = req.body || {};
     if (Array.isArray(filterIds) && filterIds.length > 0) {
       rawPoints = rawPoints.filter(p => {
-        const pointId = p.pointid || p.id || p.chargerId;
+        const pointId = p.pointId || p.id || p.chargerId || p.pointid;
         return filterIds.includes(pointId) || filterIds.includes(String(pointId));
       });
       console.log(`📋 Filtering to ${rawPoints.length} points from provided IDs: ${filterIds.join(', ')}`);
@@ -382,8 +275,7 @@ app.post(DB_REPOPULATE, async (req, res) => {
       let newCount = 0;
       let updatedCount = 0;
 
-      for (const rawPoint of rawPoints) {
-        const normalized = normalizePoint(rawPoint, plugKey);
+      for (const normalized of rawPoints) {
 
          await client.query(
            `INSERT INTO points
@@ -402,17 +294,17 @@ app.post(DB_REPOPULATE, async (req, res) => {
             last_updated = CURRENT_TIMESTAMP`,
             [
               uuidv4(),
-              normalized.id || null,
-              normalized.provider_name || null,
+              normalized.pointId || null,
+              normalized.providerName || null,
               normalized.lon || null,
               normalized.lat || null,
               normalized.status || null,
-              normalized.capacity || null,
-              normalized.price || null,
+              normalized.capacityKw || null,
+              normalized.kwhPrice || null,
               normalized.connector || null,
-              normalized.location_name || null,
+              normalized.locationName || null,
               normalized.address || null,
-              normalized.reservation_end_time || null,
+              normalized.reservationEndTime || null,
               new Date(),
               new Date(),
            ]
@@ -432,8 +324,7 @@ app.post(DB_REPOPULATE, async (req, res) => {
 
       const payload = {
         service,
-        plugKey,
-        url,
+        provider: service,
         fetched: rawPoints.length,
         newCount,
         updatedCount,
@@ -538,143 +429,7 @@ app.get(API_POINTS_BY_ID, async (req, res) => {
   }
 });
 
-/**
- * POST /api/points/:pointId/reserve
- * Reserve a charging point via provider API and update DB status
- */
-app.post(API_POINTS_RESERVE, async (req, res) => {
-  try {
-const { pointId } = req.params;
-
-    // Client sends { duration: <minutes> } (per requirement: request JSON has `minutes` key)
-    // Accept both `duration` and `minutes` for robustness.
-    const { duration, minutes } = req.body || {};
-    const reserveMinutes = duration ?? minutes;
-
-    const [rows] = await pointsMysql.query(
-      'SELECT * FROM points WHERE point_id = ?',
-      [pointId]
-    );
-
-    if (rows.length === 0) {
-      return res.status(404).json({ error: 'Point not found' });
-    }
-
-    const point = rows[0];
-    const provider = point.provider_name;
-    const config = PROVIDER_MAP[provider];
-
-    if (!config) {
-      return res.status(400).json({ error: `Unknown provider: ${provider}` });
-    }
-
-    let reserveUrl = buildProviderUrl(provider, "reservePath", pointId);
-
-    const bearerToken = process.env.BEARER_TOKEN;
-    const headers = { 'Accept': 'application/json' };
-    if (bearerToken) {
-      headers.Authorization = `Bearer ${bearerToken}`;
-    }
-
-    // Build provider-specific request body.
-    // Requirement from user: body uses `minutes` key in the request JSON.
-    // We'll use reserveMinutes to populate provider payload.
-    let reserveBody = {};
-
-    if (reserveMinutes !== undefined && reserveMinutes !== null) {
-      // Normalize minutes to a number if possible
-      const minutesNum = Number(reserveMinutes);
-      const minutesInt = parseInt(minutesNum);
-      if (!Number.isNaN(minutesNum)) {
-        if (provider === 'bluePlug') {
-          reserveUrl += `?minutes=${minutesInt}`;
-          console.log(`Built reserveUrl for bluePlug with duration as query param: ${reserveUrl}`);
-        }else if (provider === 'redPlug') {
-          // redPlug supports duration in the URL path, so we can skip it in the body.
-          reserveUrl = buildProviderUrl(provider, "reservePathWduration", `${pointId},${minutesInt}`);
-          console.log(`Built reserveUrl for redPlug with duration in path: ${reserveUrl}`);
-        }else if (provider === 'greenPlug') {
-          reserveBody = { duration: minutesInt };
-          console.log(`Built reserveBody for greenPlug with duration in body:`, reserveBody," and reserveUrl: ", reserveUrl);
-        }else{
-          throw new Error(`Provider ${provider} must be one of redPlug, greenPlug, bluePlug for duration handling`);
-        }
-      }
-    }
-
-    console.log(`📡 Reserving point ${pointId} via ${provider}: POST ${reserveUrl}`, reserveBody);
-    const reserveResp = await axios.post(reserveUrl, reserveBody, {
-      timeout: 10000,
-      headers
-    });
-
-    const reserveData = reserveResp.data || {};
-    const normalizedResp = normalizePoint(reserveData, provider);
-
-    const newStatus = normalizedResp.status;
-    const reservationEndTime = normalizedResp.reservation_end_time;
-
-
-
-    if (newStatus !== 'held' && newStatus !== 'reserved') {
-      return res.status(400).json({
-        error: 'Reservation failed: Expecting provider to return status "held" or "reserved" after reservation attempt',
-        status: newStatus,
-        details: reserveData
-      });
-    }
-
-    try {
-      // Single UPDATE statement => atomic: either the whole row is updated or none.
-      await pointsMysql.query(
-        'UPDATE points SET status = ?, reservation_end_time = ?, last_updated = CURRENT_TIMESTAMP WHERE point_id = ?',
-        [newStatus, reservationEndTime || null, pointId]
-      );
-    } catch (dbErr) {
-      // If DB fails, do not mask the provider reservation result; return error to caller.
-      throw dbErr;
-    }
-
-    console.log(`✓ Point ${pointId} reserved successfully, status updated to ${newStatus}`);
-
-    const remainingMs = scheduleReservationExpiry(pointId, reservationEndTime);
-
-    res.json({
-      pointId,
-      provider,
-      status: newStatus,
-      reservationEndTime: reservationEndTime,
-      timestamp: new Date(),
-      expiresIn: `${Math.floor(remainingMs / 1000)} seconds`,
-      message: `Point ${pointId} reserved successfully via ${provider} both on provider api and DB`
-    });
-  } catch (err) {
-    console.error('Error reserving point:', err.message);
-    res.status(500).json({ error: 'Failed to reserve point', details: err.message });
-  }
-});
-
-app.post(API_POINTS_RESERVE_MINUTES, async (req, res) => {
-  try {
-    const { pointId, minutes } = req.params;
-    
-    // Extract host:port
-    const protocol = req.protocol; // http or https
-    const host = req.get('host'); // e.g. localhost:3001
-
-    const url_repl = API_POINTS_RESERVE.replace(':pointId', pointId);
-    console.log(`Received reserve request with minutes. Original URL: ${req.originalUrl}, Reconstructed URL: ${url_repl} to send with body { minutes: ${minutes} }`);
-    const response = await axios.post(
-      `http://${host}${url_repl}`,
-      { minutes: Number(minutes) }
-    );
-
-    res.json(response.data);
-  } catch (err) {
-    console.error('Error in reserve with minutes:', err.message);
-    res.status(500).json({ error: 'Failed to reserve point', details: err.message });
-  }
-});
+// Reservation endpoints removed from Points Service: reservation logic centralized in Reservation_Service
 
 
 /**

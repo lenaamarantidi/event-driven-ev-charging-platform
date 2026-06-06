@@ -223,6 +223,9 @@ services:
       MARIADB_USER: root
       MARIADB_PASSWORD: root
       RABBITMQ_URL: amqp://guest:guest@rabbitmq:5672
+      REDPLUG_ADAPTER_URL: http://provider-adapter-redplug:3111
+      GREENPLUG_ADAPTER_URL: http://provider-adapter-greenplug:3112
+      BLUEPLUG_ADAPTER_URL: http://provider-adapter-blueplug:3113
     depends_on:
       rabbitmq:
         condition: service_healthy
@@ -248,12 +251,10 @@ services:
       DB_PASSWORD: reservation_pass
       DB_NAME: reservation_db
       RABBITMQ_URL: amqp://guest:guest@rabbitmq:5672
-      REDPLUG_API_URL: https://davinci.softlab.ntua.gr/saas26/redPlug/api
-      GREENPLUG_API_URL: https://davinci.softlab.ntua.gr/saas26/greenPlug/api
-      BLUEPLUG_API_URL: https://davinci.softlab.ntua.gr/saas26/bluePlug/api
-      REDPLUG_API_KEY: "sk_saas_5dec282b47047b6eced41e64"
-      GREENPLUG_API_KEY: "sk_saas_5dec282b47047b6eced41e64"
-      BLUEPLUG_API_KEY: "sk_saas_5dec282b47047b6eced41e64"
+      REDPLUG_ADAPTER_URL: http://provider-adapter-redplug:3111
+      GREENPLUG_ADAPTER_URL: http://provider-adapter-greenplug:3112
+      BLUEPLUG_ADAPTER_URL: http://provider-adapter-blueplug:3113
+      # Provider API URLs/KEYs are configured in adapter services (they call the external provider APIs)
     depends_on:
       rabbitmq:
         condition: service_healthy
@@ -530,19 +531,48 @@ services:
     restart: unless-stopped
 
   # Provider API Service (OpenAPI 3.1.0)
-  provider-api-service:
+  # Provider Adapter services (one per provider)
+  provider-adapter-redplug:
     build:
-      context: .
-      dockerfile: Provider_API_Service/Dockerfile
-    container_name: saasplug-provider-api
+      context: ./Provider_Adapter_redPlug
+    container_name: saasplug-provider-adapter-redplug
     ports:
-      - "3200:3200"
+      - "3111:3111"
     environment:
-      PORT: 3200
+      PORT: 3111
       NODE_ENV: production
-      REDPLUG_BASE_URL: https://davinci.softlab.ntua.gr/saas26/redPlug/api
-      GREENPLUG_BASE_URL: https://davinci.softlab.ntua.gr/saas26/greenPlug/api
-      BLUEPLUG_BASE_URL: https://davinci.softlab.ntua.gr/saas26/bluePlug/api
+      REDPLUG_API_URL: https://davinci.softlab.ntua.gr/saas26/redPlug/api
+      REDPLUG_API_KEY: "sk_saas_5dec282b47047b6eced41e64"
+    networks:
+      - saasplug-network
+    restart: unless-stopped
+
+  provider-adapter-greenplug:
+    build:
+      context: ./Provider_Adapter_greenPlug
+    container_name: saasplug-provider-adapter-greenplug
+    ports:
+      - "3112:3112"
+    environment:
+      PORT: 3112
+      NODE_ENV: production
+      GREENPLUG_API_URL: https://davinci.softlab.ntua.gr/saas26/greenPlug/api
+      GREENPLUG_API_KEY: "sk_saas_5dec282b47047b6eced41e64"
+    networks:
+      - saasplug-network
+    restart: unless-stopped
+
+  provider-adapter-blueplug:
+    build:
+      context: ./Provider_Adapter_bluePlug
+    container_name: saasplug-provider-adapter-blueplug
+    ports:
+      - "3113:3113"
+    environment:
+      PORT: 3113
+      NODE_ENV: production
+      BLUEPLUG_API_URL: https://davinci.softlab.ntua.gr/saas26/bluePlug/api
+      BLUEPLUG_API_KEY: "sk_saas_5dec282b47047b6eced41e64"
     networks:
       - saasplug-network
     restart: unless-stopped
