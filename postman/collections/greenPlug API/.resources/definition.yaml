@@ -1,0 +1,11 @@
+$kind: collection
+description: Provider-specific API contract for greenPlug.
+variables:
+  baseUrl: https://davinci.softlab.ntua.gr/saas26/greenPlug/api
+  apiKey: sk_saas_replace_me
+auth:
+  - id: 7d9a016e-bad0-4e6d-abbf-8998de7453c2
+    type: bearer
+    name: bearer auth
+    credentials:
+      token: "{{apiKey}}"

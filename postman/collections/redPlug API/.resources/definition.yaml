@@ -1,0 +1,11 @@
+$kind: collection
+description: Provider-specific API contract for redPlug.
+variables:
+  baseUrl: https://davinci.softlab.ntua.gr/saas26/redPlug/api
+  apiKey: sk_saas_replace_me
+auth:
+  - id: d3228273-f3c7-4883-9040-f366e1043e6d
+    type: bearer
+    name: bearer auth
+    credentials:
+      token: "{{apiKey}}"

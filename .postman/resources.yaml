@@ -1,0 +1,16 @@
+# Use this workspace to collaborate
+workspace:
+  id: 14af3652-03d0-4bf2-8147-46654b020057
+
+localResources:
+  collections:
+    - ..\Reservation_Service\reservation-service-postman-collection.json
+    - ..\postman_collection.json
+
+# Each entry here maps a local resource to one or more corresponding objects in Postman Cloud
+
+cloudResources:
+  collections:
+    ..\postman\collections\bluePlug API: c1ebaf27-4e0b-49de-9229-968518b69dcb
+    ..\postman\collections\greenPlug API: 0f006a42-d2a0-47c3-8080-90ee40aa792a
+    ..\postman\collections\redPlug API: 7c1d59bf-157c-4d9d-8ce5-851046e5864e

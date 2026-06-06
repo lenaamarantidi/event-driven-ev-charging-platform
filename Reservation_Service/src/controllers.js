@@ -54,6 +54,8 @@ async function createReservation(params) {
       response = await reserveBluePlug(config, pointId, duration);
     }
 
+    const normalizedResponse = normalizeReservationResponse(providerName, response, pointId);
+
     // Log successful reservation
     await logReservation({
       reservationId,
@@ -62,13 +64,13 @@ async function createReservation(params) {
       pointId,
       duration,
       status: 'confirmed',
-      details: response,
+      details: normalizedResponse,
       userId
     });
 
     return {
       success: true,
-      data: response,
+      data: normalizedResponse,
       message: `Reservation confirmed with ${providerName}`
     };
 
@@ -121,16 +123,7 @@ async function reserveRedPlug(config, pointId, duration) {
     }
   );
 
-  return {
-    provider: 'redPlug',
-    pointid: response.data.pointid,
-    status: response.data.status,
-    reservationendtime: response.data.reservationendtime,
-    location: {
-      long: response.data.long,
-      lat: response.data.lat
-    }
-  };
+  return response.data;
 }
 
 /**
@@ -154,17 +147,7 @@ async function reserveGreenPlug(config, pointId, duration) {
     }
   );
 
-  return {
-    provider: 'greenPlug',
-    id: response.data.id,
-    state: response.data.state,
-    reservedUntil: response.data.reservedUntil,
-    kwhRateEur: response.data.kwhRateEur,
-    location: {
-      long: response.data.coords?.long,
-      lat: response.data.coords?.lat
-    }
-  };
+  return response.data;
 }
 
 /**
@@ -188,16 +171,54 @@ async function reserveBluePlug(config, pointId, duration) {
     }
   );
 
+  return response.data;
+}
+
+function normalizeReservationResponse(providerName, responseData, fallbackPointId = null) {
+  if (!responseData || typeof responseData !== 'object') {
+    throw new Error('Invalid provider reservation response');
+  }
+
+  let pointid = null;
+  let status = null;
+  let reservationendtime = null;
+
+  switch (providerName) {
+    case 'redPlug':
+      pointid = responseData.pointid ?? responseData.id ?? responseData.chargerId ?? null;
+      status = responseData.status ?? responseData.state ?? responseData.currentStatus ?? null;
+      reservationendtime = responseData.reservationendtime ?? responseData.reservedUntil ?? responseData.reservationEnd ?? null;
+      break;
+    case 'greenPlug':
+      pointid = responseData.id ?? responseData.pointid ?? responseData.chargerId ?? null;
+      status = responseData.state ?? responseData.status ?? responseData.currentStatus ?? null;
+      reservationendtime = responseData.reservedUntil ?? responseData.reservationendtime ?? responseData.reservationEnd ?? null;
+      break;
+    case 'bluePlug':
+      pointid = responseData.chargerId ?? responseData.pointid ?? responseData.id ?? null;
+      status = responseData.currentStatus ?? responseData.status ?? responseData.state ?? null;
+      reservationendtime = responseData.reservationEnd ?? responseData.reservedUntil ?? responseData.reservationendtime ?? null;
+      break;
+    default:
+      throw new Error(`Unknown provider for normalization: ${providerName}`);
+  }
+
+  if (!pointid && fallbackPointId) {
+    pointid = fallbackPointId;
+  }
+
+  if (!status || String(status).toLowerCase() !== 'reserved') {
+    reservationendtime = '1970-01-01 00:00';
+  } else if (!reservationendtime) {
+    reservationendtime = '1970-01-01 00:00';
+  }
+
   return {
-    provider: 'bluePlug',
-    chargerId: response.data.chargerId,
-    currentStatus: response.data.currentStatus,
-    reservationEnd: response.data.reservationEnd,
-    pricePerKwh: response.data.pricePerKwh,
-    location: {
-      long: response.data.geo?.[0],
-      lat: response.data.geo?.[1]
-    }
+    pointid,
+    status,
+    reservationendtime,
+    provider: providerName,
+    raw: responseData
   };
 }
 

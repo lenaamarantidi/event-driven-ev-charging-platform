@@ -1,0 +1,5 @@
+$kind: http-request
+description: List all `greenPlug` charging points.
+url: "{{baseUrl}}/chargingPoints"
+method: GET
+order: 1000

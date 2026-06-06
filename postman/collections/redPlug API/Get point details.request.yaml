@@ -1,0 +1,7 @@
+$kind: http-request
+description: Get one `redPlug` charging point by `pointid`.
+url: "{{baseUrl}}/point/:pointid"
+method: GET
+pathVariables:
+  pointid: ""
+order: 2000

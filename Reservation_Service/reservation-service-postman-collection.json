@@ -1,0 +1,282 @@
+{
+  "info": {
+    "name": "Reservation Service - saas26-11",
+    "description": "Postman collection for testing the local Reservation Service and provider API key flow.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    {
+      "key": "baseUrl",
+      "value": "http://localhost:3106",
+      "type": "string"
+    },
+    {
+      "key": "apiKey",
+      "value": "sk_saas_5dec282b47047b6eced41e64",
+      "type": "string"
+    },
+    {
+      "key": "providerNameRedPlug",
+      "value": "redPlug",
+      "type": "string"
+    },
+    {
+      "key": "providerNameGreenPlug",
+      "value": "greenPlug",
+      "type": "string"
+    },
+    {
+      "key": "providerNameBluePlug",
+      "value": "bluePlug",
+      "type": "string"
+    },
+    {
+      "key": "pointIdRed",
+      "value": "RED-001",
+      "type": "string"
+    },
+    {
+      "key": "pointIdGreen",
+      "value": "GREEN-001",
+      "type": "string"
+    },
+    {
+      "key": "pointIdBlue",
+      "value": "BLUE-001",
+      "type": "string"
+    },
+    {
+      "key": "duration",
+      "value": "30",
+      "type": "string"
+    },
+    {
+      "key": "userId",
+      "value": "test-user-123",
+      "type": "string"
+    },
+    {
+      "key": "reservationId",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "redPlugBaseUrl",
+      "value": "https://davinci.softlab.ntua.gr/saas26/redPlug/api",
+      "type": "string"
+    }
+  ],
+  "item": [
+    {
+      "name": "Reservation Service Health Check",
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": {
+          "raw": "{{baseUrl}}/health"
+        }
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "exec": [
+              "pm.test('Health check passed', function () {",
+              "  pm.response.to.have.status(200);",
+              "  const json = pm.response.json();",
+              "  pm.expect(json.status).to.eql('ok');",
+              "  pm.expect(json.service).to.eql('Reservation_Service');",
+              "});"
+            ],
+            "type": "text/javascript"
+          }
+        }
+      ]
+    },
+    {
+      "name": "Create Reservation - redPlug",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"providerName\": \"{{providerNameRedPlug}}\",\n  \"pointId\": \"{{pointIdRed}}\",\n  \"duration\": {{duration}},\n  \"userId\": \"{{userId}}\"\n}"
+        },
+        "url": {
+          "raw": "{{baseUrl}}/api/reserve"
+        }
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "exec": [
+              "const response = pm.response.json();",
+              "if (response.success && response.reservationId) {",
+              "  pm.environment.set('reservationId', response.reservationId);",
+              "}",
+              "pm.test('Reservation created successfully', function () {",
+              "  pm.response.to.have.status(200);",
+              "  pm.expect(response.success).to.eql(true);",
+              "  pm.expect(response.reservationId).to.be.a('string');",
+              "});"
+            ],
+            "type": "text/javascript"
+          }
+        }
+      ]
+    },
+    {
+      "name": "Create Reservation - greenPlug",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"providerName\": \"{{providerNameGreenPlug}}\",\n  \"pointId\": \"{{pointIdGreen}}\",\n  \"duration\": {{duration}},\n  \"userId\": \"{{userId}}\"\n}"
+        },
+        "url": {
+          "raw": "{{baseUrl}}/api/reserve"
+        }
+      }
+    },
+    {
+      "name": "Create Reservation - bluePlug",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"providerName\": \"{{providerNameBluePlug}}\",\n  \"pointId\": \"{{pointIdBlue}}\",\n  \"duration\": {{duration}},\n  \"userId\": \"{{userId}}\"\n}"
+        },
+        "url": {
+          "raw": "{{baseUrl}}/api/reserve"
+        }
+      }
+    },
+    {
+      "name": "Create Reservation - invalid provider",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"providerName\": \"invalidPlug\",\n  \"pointId\": \"TEST-001\",\n  \"duration\": 30,\n  \"userId\": \"test-user-123\"\n}"
+        },
+        "url": {
+          "raw": "{{baseUrl}}/api/reserve"
+        }
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "exec": [
+              "pm.test('Invalid provider returns 400', function () {",
+              "  pm.response.to.have.status(400);",
+              "  const response = pm.response.json();",
+              "  pm.expect(response.success).to.eql(false);",
+              "  pm.expect(response.error).to.include('Invalid provider');",
+              "});"
+            ],
+            "type": "text/javascript"
+          }
+        }
+      ]
+    },
+    {
+      "name": "Create Reservation - missing fields",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"providerName\": \"redPlug\"\n}"
+        },
+        "url": {
+          "raw": "{{baseUrl}}/api/reserve"
+        }
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "exec": [
+              "pm.test('Missing fields returns 400', function () {",
+              "  pm.response.to.have.status(400);",
+              "  const response = pm.response.json();",
+              "  pm.expect(response.success).to.eql(false);",
+              "  pm.expect(response.error).to.include('Missing required fields');",
+              "});"
+            ],
+            "type": "text/javascript"
+          }
+        }
+      ]
+    },
+    {
+      "name": "List Reservations",
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": {
+          "raw": "{{baseUrl}}/api/reservations"
+        }
+      }
+    },
+    {
+      "name": "Get Reservation by ID",
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": {
+          "raw": "{{baseUrl}}/api/reservations/{{reservationId}}"
+        }
+      }
+    },
+    {
+      "name": "Direct Provider Test - redPlug API Key",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          },
+          {
+            "key": "Authorization",
+            "value": "Bearer {{apiKey}}"
+          }
+        ],
+        "url": {
+          "raw": "{{redPlugBaseUrl}}/reserve/{{pointIdRed}}/{{duration}}"
+        }
+      }
+    }
+  ]
+}
