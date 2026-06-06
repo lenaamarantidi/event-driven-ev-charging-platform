@@ -1,0 +1,7 @@
+$kind: http-request
+description: Get one `greenPlug` charging point by `pointid`.
+url: "{{baseUrl}}/chargingPoints/:pointid"
+method: GET
+pathVariables:
+  pointid: ""
+order: 2000

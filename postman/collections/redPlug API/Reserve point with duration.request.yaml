@@ -1,0 +1,8 @@
+$kind: http-request
+description: Reserve a `redPlug` point for a requested duration in minutes.
+url: "{{baseUrl}}/reserve/:pointid/:minutes"
+method: POST
+pathVariables:
+  pointid: ""
+  minutes: ""
+order: 4000

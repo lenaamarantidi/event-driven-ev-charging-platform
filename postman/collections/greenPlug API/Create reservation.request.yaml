@@ -1,0 +1,15 @@
+$kind: http-request
+description: Reserve a `greenPlug` charging point.
+url: "{{baseUrl}}/chargingPoints/:pointid/reservations"
+method: POST
+headers:
+  Content-Type: application/json
+pathVariables:
+  pointid: ""
+body:
+  type: json
+  content: |-
+    {
+      "duration": 0
+    }
+order: 3000

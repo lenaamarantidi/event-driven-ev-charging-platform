@@ -1,7 +1,7 @@
 /**
  * Reservation Service (Port 3009)
  * * Unified API for reserving EV charging points across multiple providers
- * Publishes reservation_successful events to RabbitMQ for Billing & Analytics services
+ * Publishes reservation_successful events to RabbitMQ for Points service and daily analytics batches to Analytics service
  */
 
 const express = require('express');
@@ -14,9 +14,10 @@ const app = express();
 app.use(express.json());
 
 // Import modules
-const { initializeDatabase, testDatabaseConnection } = require('./db');
-const { connectWithRetry, publishReservationEvent } = require('./rabbitmq');
+const { initializeDatabase, testDatabaseConnection, getPool } = require('./db');
+const { connectWithRetry, publishReservationEvent, publishAnalyticsDaily } = require('./rabbitmq');
 const { createReservation } = require('./controllers');
+
 
 // To σωστό port σύμφωνα με το docker-compose.yml
 const PORT = process.env.PORT || 3009;
@@ -84,9 +85,13 @@ app.post('/api/reserve', async (req, res) => {
     console.log(`[RESERVE] Success: ${reservationId}`);
 
     // Get provider ID for event publishing
-    let providerId = 1; 
+    let providerId = 1;
     if (providerName === 'greenPlug') providerId = 2;
     if (providerName === 'bluePlug') providerId = 3;
+
+    const reservationDetails = result.data;
+    const reservationEndTime = reservationDetails?.reservationendtime || reservationDetails?.reservedUntil || reservationDetails?.reservationEnd || reservationDetails?.reservation_end_time || null;
+    const reservationStatus = reservationDetails?.status || reservationDetails?.state || reservationDetails?.currentStatus || 'reserved';
 
     // Publish to RabbitMQ (async, non-blocking)
     try {
@@ -96,7 +101,10 @@ app.post('/api/reserve', async (req, res) => {
         providerName,
         pointId,
         duration,
-        timestamp: new Date().toLocaleString('el-GR', { timeZone: 'Europe/Athens', hour12: false })
+        timestamp: new Date().toISOString(),
+        reservationDetails,
+        reservation_end_time: reservationEndTime,
+        reservation_status: reservationStatus
       });
       console.log(`[RABBITMQ] Event published for reservation ${reservationId}`);
     } catch (rabbitmqError) {
@@ -164,6 +172,61 @@ app.get('/api/reservations/:reservationId', async (req, res) => {
 
 // ============== SERVER STARTUP ==============
 
+function runDailyAnalyticsBatch() {
+  const runAtHour = Number(process.env.DAILY_ANALYTICS_HOUR || 2); // 02:00 local by default
+  const pool = getPool();
+
+  const now = new Date();
+  const next = new Date(now);
+  next.setHours(runAtHour, 0, 0, 0);
+  if (next <= now) next.setDate(next.getDate() + 1);
+
+  const delayMs = next.getTime() - now.getTime();
+
+  setTimeout(async () => {
+    try {
+      const dateStr = new Date().toISOString().split('T')[0];
+
+      // Fetch *all* reservation attempts for the day (successful + unsuccessful)
+      const [rows] = await pool.query(
+        `SELECT reservation_id, provider_id, provider_name, point_id, duration, status, created_at,
+                reservation_details, user_id
+         FROM reservation_logs
+         WHERE DATE(created_at) = ?
+         ORDER BY created_at ASC`,
+        [dateStr]
+      );
+
+      // Send full daily reservation logs list ONLY (no aggregates/sums)
+      const dailyLogs = rows.map(r => ({
+        reservationId: r.reservation_id,
+        providerId: r.provider_id,
+        providerName: r.provider_name,
+        pointId: r.point_id,
+        duration: r.duration,
+        status: r.status,
+        userId: r.user_id,
+        createdAt: r.created_at,
+        reservationDetails: r.reservation_details
+      }));
+
+      await publishAnalyticsDaily({
+        date: dateStr,
+        reservationLogs: dailyLogs
+      });
+
+
+      // console.log(`[DailyAnalyticsBatch] Published for date=${dateStr}`);
+
+    } catch (err) {
+      console.error('[DailyAnalyticsBatch] failed:', err.message);
+    } finally {
+      // schedule next run (24h)
+      setTimeout(() => runDailyAnalyticsBatch(), 24 * 60 * 60 * 1000);
+    }
+  }, delayMs);
+}
+
 async function startServer() {
   try {
     // Initialize database
@@ -173,16 +236,23 @@ async function startServer() {
     // Connect to RabbitMQ
     await connectWithRetry();
 
+    // Start daily analytics job
+    runDailyAnalyticsBatch();
+
     // Start Express server
     app.listen(PORT, () => {
       console.log(`\n✓ Reservation_Service started on http://localhost:${PORT}`);
-      console.log(`✓ RabbitMQ: Connected`);
+      console.log('✓ RabbitMQ: Connected');
+      console.log(`✓ Daily analytics batch scheduled (hour=${process.env.DAILY_ANALYTICS_HOUR || 2})`);
     });
   } catch (error) {
     console.error('✗ Startup error:', error.message);
+    console.error('Full error details:', error);
     process.exit(1);
   }
 }
+
+startServer();
 
 // ============== GRACEFUL SHUTDOWN ==============
 
@@ -200,4 +270,3 @@ process.on('SIGINT', async () => {
   process.exit(0);
 });
 
-startServer();

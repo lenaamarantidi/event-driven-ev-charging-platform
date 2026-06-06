@@ -1,0 +1,9 @@
+$kind: http-request
+description: Reserve a `bluePlug` charger using a query parameter for minutes.
+url: "{{baseUrl}}/location/:pointid/hold?minutes="
+method: POST
+queryParams:
+  minutes: ""
+pathVariables:
+  pointid: ""
+order: 3000

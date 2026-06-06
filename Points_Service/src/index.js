@@ -14,6 +14,7 @@ const mysql = require('mysql2/promise');
 
 const axios = require('axios');
 const { v4: uuidv4 } = require('uuid');
+const { connectRabbitMQ, closeConnection: closeRabbitMQ, setDependencies } = require('./rabbitmq');
 
 const app = express();
 app.use(express.json());
@@ -706,20 +707,56 @@ app.get(HEALTH, async (req, res) => {
 
 const PORT = process.env.PORT || 3001;
 
-const server = app.listen(PORT, () => {
-  const ips = getAccessibleIps();
-  console.log(`✓ Points Service ${process.env.SERVICE } running on port ${PORT}`);
-  console.log(`✓ MariaDB: ${process.env.MARIADB_HOST}:${process.env.MARIADB_PORT}/${dbName}`);
-  console.log(`✓ Access via: ${ips.map(ip => `http://${ip}:${PORT}`).join(', ')}`);
-});
+let server = null;
+
+async function startServer() {
+  try {
+    setDependencies({ db: pointsMysql, scheduleReservationExpiry });
+    await connectRabbitMQ();
+
+    server = app.listen(PORT, () => {
+      const ips = getAccessibleIps();
+      console.log(`✓ Points Service ${process.env.SERVICE } running on port ${PORT}`);
+      console.log(`✓ MariaDB: ${process.env.MARIADB_HOST}:${process.env.MARIADB_PORT}/${dbName}`);
+      console.log(`✓ Access via: ${ips.map(ip => `http://${ip}:${PORT}`).join(', ')}`);
+    });
+  } catch (err) {
+    console.error('✗ Failed to start Points Service:', err.message);
+    process.exit(1);
+  }
+}
+
+startServer();
 
 // Graceful shutdown
-process.on('SIGTERM', () => {
+process.on('SIGTERM', async () => {
   console.log('SIGTERM received, shutting down gracefully');
-  server.close(() => {
-    pointsMysql.end();
+  if (server) {
+    server.close(async () => {
+      await closeRabbitMQ();
+      await pointsMysql.end();
+      process.exit(0);
+    });
+  } else {
+    await closeRabbitMQ();
+    await pointsMysql.end();
     process.exit(0);
-  });
+  }
+});
+
+process.on('SIGINT', async () => {
+  console.log('SIGINT received, shutting down gracefully');
+  if (server) {
+    server.close(async () => {
+      await closeRabbitMQ();
+      await pointsMysql.end();
+      process.exit(0);
+    });
+  } else {
+    await closeRabbitMQ();
+    await pointsMysql.end();
+    process.exit(0);
+  }
 });
 
 module.exports = app;
