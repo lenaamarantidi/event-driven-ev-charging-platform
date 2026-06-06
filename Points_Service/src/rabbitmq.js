@@ -8,7 +8,7 @@
 const amqp = require('amqplib');
 
 const RABBITMQ_URL = process.env.RABBITMQ_URL || 'amqp://localhost';
-const EXCHANGE_NAME = 'analytics_exchange';
+const EXCHANGE_NAME = process.env.POINTS_RESERVATION_EXCHANGE || 'reservation_exchange';
 const QUEUE_NAME = 'points_reservation_queue';
 
 let connection = null;

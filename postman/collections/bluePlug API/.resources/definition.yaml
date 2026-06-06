@@ -1,0 +1,11 @@
+$kind: collection
+description: Provider-specific API contract for bluePlug.
+variables:
+  baseUrl: https://davinci.softlab.ntua.gr/saas26/bluePlug/api
+  apiKey: sk_saas_replace_me
+auth:
+  - id: 005f9249-e5b8-462c-ab98-5d80095bec95
+    type: bearer
+    name: bearer auth
+    credentials:
+      token: "{{apiKey}}"

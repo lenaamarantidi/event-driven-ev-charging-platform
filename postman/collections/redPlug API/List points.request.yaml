@@ -1,0 +1,5 @@
+$kind: http-request
+description: List all `redPlug` charging points.
+url: "{{baseUrl}}/points"
+method: GET
+order: 1000

@@ -1,0 +1,7 @@
+$kind: http-request
+description: Get status for one `bluePlug` charger by `pointid`.
+url: "{{baseUrl}}/location/:pointid/status"
+method: GET
+pathVariables:
+  pointid: ""
+order: 2000

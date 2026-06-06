@@ -1,6 +1,6 @@
 /**
  * RabbitMQ Publisher
- * Publishes reservation_successful events to billing & analytics services
+ * Publishes reservation_successful events to Reservation & Points services
  */
 
 const amqp = require('amqplib');
@@ -12,14 +12,10 @@ let channel;
 const RABBITMQ_URL = process.env.RABBITMQ_URL || 'amqp://localhost';
 
 const EXCHANGES = {
-  billing: 'billing_exchange',
-  analytics: 'analytics_exchange'
+  // Note: billing and per-reservation analytics updates are handled elsewhere / removed by design.
+  reservation: 'reservation_exchange'
 };
 
-const QUEUES = {
-  billingQueue: 'billing_reservation_queue',
-  analyticsQueue: 'analytics_reservation_queue'
-};
 
 /**
  * Connect to RabbitMQ with exponential backoff retry
@@ -32,20 +28,13 @@ async function connectWithRetry(attempt = 1, maxAttempts = 5) {
     channel = await connection.createChannel();
 
     // Declare exchanges
-    await channel.assertExchange(EXCHANGES.billing, 'topic', { durable: true });
-    await channel.assertExchange(EXCHANGES.analytics, 'topic', { durable: true });
+    await channel.assertExchange(EXCHANGES.reservation, 'topic', { durable: true });
 
-    // Declare queues
-    await channel.assertQueue(QUEUES.billingQueue, { durable: true });
-    await channel.assertQueue(QUEUES.analyticsQueue, { durable: true });
 
-    // Bind queues to exchanges
-    await channel.bindQueue(QUEUES.billingQueue, EXCHANGES.billing, 'reservation_successful');
-    await channel.bindQueue(QUEUES.analyticsQueue, EXCHANGES.analytics, 'reservation_successful');
-
-    // Setup dead letter exchanges
+    // Setup dead letter exchanges (harmless if not used)
     await channel.assertExchange('dlx_billing', 'topic', { durable: true });
     await channel.assertExchange('dlx_analytics', 'topic', { durable: true });
+
 
     console.log('✓ RabbitMQ connected successfully');
     console.log('✓ Exchanges & Queues initialized');
@@ -67,8 +56,10 @@ async function connectWithRetry(attempt = 1, maxAttempts = 5) {
 
 /**
  * Publish reservation_successful event
- * This event is consumed by Billing_Service and Analytics_Service
+ * This event is consumed by Points_Service.
+ * Billing/Analytics are now updated via daily batch publishing.
  */
+
 async function publishReservationEvent(eventData) {
   try {
     if (!channel) {
@@ -113,20 +104,14 @@ async function publishReservationEvent(eventData) {
 
     const messageBuffer = Buffer.from(JSON.stringify(message));
 
-    // Publish to both billing and analytics exchanges
-    const billingPublished = channel.publish(
-      EXCHANGES.billing,
+    // Publish to reservation exchange only (Billing/Analytics are batch-updated by Reservation_Service)
+    const reservationPublished = channel.publish(
+      EXCHANGES.reservation,
       'reservation_successful',
       messageBuffer
     );
 
-    const analyticsPublished = channel.publish(
-      EXCHANGES.analytics,
-      'reservation_successful',
-      messageBuffer
-    );
-
-    if (!billingPublished || !analyticsPublished) {
+    if (!reservationPublished) {
       console.warn('[RabbitMQ] Message may not have been queued (backpressure)');
     }
 
@@ -137,6 +122,7 @@ async function publishReservationEvent(eventData) {
       Point: ${pointId}
       Duration: ${duration} minutes
     `);
+
 
     return true;
   } catch (error) {
@@ -173,9 +159,46 @@ async function closeConnection() {
   }
 }
 
+/**
+ * Publish a daily analytics aggregate payload to analytics_exchange.
+ */
+async function publishAnalyticsDaily(payload) {
+  try {
+    if (!channel) throw new Error('RabbitMQ channel not initialized');
+
+    // Declare exchange lazily (safe if already exists)
+    const ANALYTICS_EXCHANGE = 'analytics_exchange';
+    await channel.assertExchange(ANALYTICS_EXCHANGE, 'topic', { durable: true });
+
+    const routingKey = 'analytics.reservations.daily';
+
+    const message = {
+      eventType: 'analytics_reservations_daily',
+      type: 'analytics_reservations_daily',
+      timestamp: new Date().toISOString(),
+      data: payload
+    };
+
+    const messageBuffer = Buffer.from(JSON.stringify(message));
+
+    const published = channel.publish(ANALYTICS_EXCHANGE, routingKey, messageBuffer);
+    if (!published) {
+      console.warn('[RabbitMQ] Daily analytics batch may not have been queued (backpressure)');
+    }
+
+    console.log(`[RabbitMQ] Published daily analytics batch for date ${payload?.date}`);
+    return true;
+  } catch (error) {
+    console.error('[RabbitMQ] publishAnalyticsDaily error:', error.message);
+    throw error;
+  }
+}
+
 module.exports = {
   connectWithRetry,
   publishReservationEvent,
+  publishAnalyticsDaily,
   getChannel,
   closeConnection
 };
+
