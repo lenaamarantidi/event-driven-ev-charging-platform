@@ -642,7 +642,7 @@ PORT=3100  # Auth Service
 # ... etc
 
 # Database URLs (for future implementation)
-AUTH_DB_URL=postgresql://user:pass@localhost:5432/auth_service
+AUTH_DB_URL=mysql://auth_user:auth_pass@mariadb-auth:3306/auth_db
 COLLECTOR_DB_URL=postgresql://user:pass@localhost:5432/collector_service
 # ... etc
 ```
