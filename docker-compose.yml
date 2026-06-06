@@ -120,7 +120,6 @@ services:
       - saasplug-network
     volumes:
       - mysql-red-data:/var/lib/mysql
-      - ./databases/provider-db.sql:/docker-entrypoint-initdb.d/01-provider.sql
 
   # MySQL Green Provider Database
   mysql-green:
@@ -140,7 +139,6 @@ services:
       - saasplug-network
     volumes:
       - mysql-green-data:/var/lib/mysql
-      - ./databases/provider-db.sql:/docker-entrypoint-initdb.d/01-provider.sql
 
   # MySQL Blue Provider Database
   mysql-blue:
@@ -160,7 +158,6 @@ services:
       - saasplug-network
     volumes:
       - mysql-blue-data:/var/lib/mysql
-      - ./databases/provider-db.sql:/docker-entrypoint-initdb.d/01-provider.sql
 
   # MariaDB Database for Reservation Service
   mariadb-reservations:
