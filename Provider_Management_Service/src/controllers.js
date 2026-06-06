@@ -317,7 +317,7 @@ async function healthCheck(req, res) {
       port: process.env.PORT || 3105,
       database: process.env.DB_NAME || 'provider_mgmt_db',
       totalProviders: Number(countRows[0].total || 0),
-      timestamp: new Date().toISOString()
+      timestamp: new Date().toLocaleString('el-GR', { timeZone: 'Europe/Athens', hour12: false })
     });
   } catch (err) {
     return res.status(503).json({

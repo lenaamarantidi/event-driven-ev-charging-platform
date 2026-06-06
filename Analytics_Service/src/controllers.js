@@ -70,8 +70,8 @@ async function getProviderAnalytics(req, res) {
        ORDER BY date DESC`,
       [
         parsedProviderId,
-        dateFrom.toISOString().split('T')[0],
-        dateTo.toISOString().split('T')[0]
+        from: new Date(dateFrom).toLocaleDateString('el-GR'),
+        to: new Date(dateTo).toLocaleDateString('el-GR')
       ]
     );
 
@@ -96,8 +96,8 @@ async function getProviderAnalytics(req, res) {
       provider_id: parsedProviderId,
       period,
       date_range: {
-        from: dateFrom.toISOString().split('T')[0],
-        to: dateTo.toISOString().split('T')[0]
+        from: new Date(dateFrom).toLocaleDateString('el-GR'),
+        to: new Date(dateTo).toLocaleDateString('el-GR')
       },
       summary: {
         total_searches: stats.searches,
@@ -105,7 +105,7 @@ async function getProviderAnalytics(req, res) {
         total_reservations: stats.reservations
       },
       daily_breakdown: dailyData,
-      timestamp: new Date().toISOString()
+      timestamp: new Date().toLocaleString('el-GR', { timeZone: 'Europe/Athens', hour12: false })
     });
   } catch (err) {
     console.error('Error in getProviderAnalytics:', err.message);
@@ -167,7 +167,7 @@ async function getProviderDailyAnalytics(req, res) {
       totals,
       daily_records: data,
       count: data.length,
-      timestamp: new Date().toISOString()
+      timestamp: new Date().toLocaleString('el-GR', { timeZone: 'Europe/Athens', hour12: false })
     });
   } catch (err) {
     console.error('Error in getProviderDailyAnalytics:', err.message);
@@ -254,8 +254,8 @@ async function getGlobalAnalytics(req, res) {
       scope: 'global',
       period,
       date_range: {
-        from: dateFrom.toISOString().split('T')[0],
-        to: dateTo.toISOString().split('T')[0]
+        from: new Date(dateFrom).toLocaleDateString('el-GR'),
+        to: new Date(dateTo).toLocaleDateString('el-GR')
       },
       summary: {
         total_searches: stats.searches,
@@ -263,7 +263,7 @@ async function getGlobalAnalytics(req, res) {
         total_reservations: stats.reservations
       },
       provider_breakdown: providerBreakdown,
-      timestamp: new Date().toISOString()
+      timestamp: new Date().toLocaleString('el-GR', { timeZone: 'Europe/Athens', hour12: false })
     });
   } catch (err) {
     console.error('Error in getGlobalAnalytics:', err.message);
@@ -325,14 +325,14 @@ async function exportProviderLogs(req, res) {
       let csv = 'Log ID,Provider ID,Action Type,User ID,Point ID,Session ID,Timestamp,Details\n';
       
       logs.forEach(log => {
-        const timestamp = log.timestamp instanceof Date ? log.timestamp.toISOString() : log.timestamp;
+        const timestamp = log.timestamp instanceof Date ? new Date(log.timestamp).toLocaleString('el-GR', { timeZone: 'Europe/Athens', hour12: false }) : log.timestamp;
         const details = log.details ? log.details.replace(/"/g, '""') : '';
         csv += `"${log.id}","${log.provider_id}","${log.action_type}","${log.user_id || ''}","${log.point_id || ''}","${log.session_id || ''}","${timestamp}","${details}"\n`;
       });
 
       // Send as file download
       res.setHeader('Content-Type', 'text/csv');
-      res.setHeader('Content-Disposition', `attachment; filename="provider_${parsedProviderId}_logs_${new Date().toISOString().split('T')[0]}.csv"`);
+      res.setHeader('Content-Disposition', `attachment; filename="provider_${parsedProviderId}_logs_${new Date().toLocaleDateString('el-GR')}.csv"`);
       return res.send(csv);
 
     } else if (format.toLowerCase() === 'json') {
@@ -340,12 +340,12 @@ async function exportProviderLogs(req, res) {
       return res.json({
         provider_id: parsedProviderId,
         period: {
-          from: dateFrom.toISOString().split('T')[0],
-          to: dateTo.toISOString().split('T')[0]
+          from: new Date(dateFrom).toLocaleDateString('el-GR'),
+          to: new Date(dateTo).toLocaleDateString('el-GR')
         },
         total_records: logs.length,
         logs: logs,
-        generated_at: new Date().toISOString()
+        generated_at: new Date().toLocaleString('el-GR', { timeZone: 'Europe/Athens', hour12: false })
       });
 
     } else {
@@ -417,14 +417,14 @@ async function requestInvoiceGeneration(req, res) {
       provider_id: parsedProviderId,
       period,
       date_range: {
-        from: dateFrom.toISOString().split('T')[0],
-        to: dateTo.toISOString().split('T')[0]
+        from: new Date(dateFrom).toLocaleDateString('el-GR'),
+        to: new Date(dateTo).toLocaleDateString('el-GR')
       },
       action_summary: actionCounts,
       total_actions: actionCounts.reduce((sum, row) => sum + row.count, 0),
       status: 'ready_for_billing',
       next_step: 'Call Billing_Service to generate invoice',
-      timestamp: new Date().toISOString()
+      timestamp: new Date().toLocaleString('el-GR', { timeZone: 'Europe/Athens', hour12: false })
     });
 
   } catch (err) {
@@ -451,7 +451,7 @@ async function healthCheck(req, res) {
       database: process.env.DB_NAME || 'analytics_db',
       totalEvents: Number(countRows[0].total || 0),
       totalProviders: Number(providerRows[0].total || 0),
-      timestamp: new Date().toISOString()
+      timestamp: new Date().toLocaleString('el-GR', { timeZone: 'Europe/Athens', hour12: false })
     });
   } catch (err) {
     return res.status(503).json({

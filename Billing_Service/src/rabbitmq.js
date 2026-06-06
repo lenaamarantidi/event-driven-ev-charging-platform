@@ -108,7 +108,7 @@ async function handleBillingEvent(msg) {
       try {
         fs.mkdirSync('logs', { recursive: true });
         const dump = {
-          ts: new Date().toISOString(),
+          ts: new Date().toLocaleString('el-GR', { timeZone: 'Europe/Athens', hour12: false }),
           properties: msg.properties || {},
           utf8: content,
           base64: raw ? raw.toString('base64') : null,
@@ -139,7 +139,7 @@ async function handleBillingEvent(msg) {
     const providerId = data.providerId || data.provider_id || data.event_metadata?.provider_id;
     const reservationId = data.reservationId || data.reservation_id || data.event_metadata?.reservation_id;
     const amount = data.amount || data.estimatedCost || data.event_metadata?.amount || 0;
-    const timestamp = event.timestamp || data.timestamp || new Date().toISOString();
+    const timestamp = event.timestamp || data.timestamp || new Date().toLocaleString('el-GR', { timeZone: 'Europe/Athens', hour12: false });
 
     if (!providerId) {
       console.error('Event missing providerId:', { event, data });
@@ -157,7 +157,7 @@ async function handleBillingEvent(msg) {
     // Get the billing month (first day of the month)
     const date = new Date(timestamp);
     const billingMonth = new Date(date.getFullYear(), date.getMonth(), 1);
-    const billingMonthStr = billingMonth.toISOString().split('T')[0];
+    const billingMonthStr = new Date(billingMonth).toLocaleDateString('el-GR');
 
     // If no amount provided, use the default pricing
     let billAmount = amount;
@@ -165,17 +165,20 @@ async function handleBillingEvent(msg) {
       billAmount = await getDefaultPricing();
     }
 
-    // Normalize reservation id to integer (DB expects integer id); fallback to 0
-    let reservationIdParam = parseInt(reservationId, 10);
-    if (isNaN(reservationIdParam)) reservationIdParam = 0;
+    // Validate reservation UUID
+    if (!reservationId || reservationId === '') {
+      console.error('Event missing reservationId:', { event, data });
+      channel.nack(msg, false, false); // Dead-letter
+      return;
+    }
 
-    // Insert billable event
+    // Insert billable event with UUID reservation_id
     await pool.query(
       `INSERT INTO billable_events (provider_id, reservation_id, amount, event_type, created_at, billing_month)
        VALUES (?, ?, ?, 'reservation', ?, ?)`,
       [
         providerId,
-        reservationIdParam,
+        reservationId,
         parseFloat(billAmount),
         new Date(timestamp),
         billingMonthStr

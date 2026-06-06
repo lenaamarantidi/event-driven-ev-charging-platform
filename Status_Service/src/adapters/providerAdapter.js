@@ -149,7 +149,7 @@ class ProviderAdapter {
         statusCode: response.status,
         responseTime,
         endpoint: url,
-        timestamp: new Date()
+        timestamp: new Date().toLocaleString('el-GR', { timeZone: 'Europe/Athens', hour12: false })
       };
     } catch (err) {
       const responseTime = Date.now() - startTime;
@@ -161,7 +161,7 @@ class ProviderAdapter {
         responseTime,
         endpoint: this.getListPointsUrl(),
         statusCode: err.response?.status || 'N/A',
-        timestamp: new Date()
+        timestamp: new Date().toLocaleString('el-GR', { timeZone: 'Europe/Athens', hour12: false })
       };
     }
   }
@@ -226,7 +226,7 @@ class ProviderAdapter {
       health: healthCheck,
       endpoints: endpointCheck.endpoints,
       failedEndpoints,
-      timestamp: new Date()
+      timestamp: new Date().toLocaleString('el-GR', { timeZone: 'Europe/Athens', hour12: false })
     };
   }
 }
@@ -236,7 +236,7 @@ class ProviderAdapter {
  */
 ProviderAdapterFactory.checkAllProviders = async function() {
   const results = {
-    timestamp: new Date(),
+    timestamp: new Date().toLocaleString('el-GR', { timeZone: 'Europe/Athens', hour12: false }),
     providers: {},
     summary: {
       healthy: 0,
@@ -264,7 +264,7 @@ ProviderAdapterFactory.checkAllProviders = async function() {
         provider: providerName,
         overallStatus: 'error',
         error: err.message,
-        timestamp: new Date()
+        timestamp: new Date().toLocaleString('el-GR', { timeZone: 'Europe/Athens', hour12: false })
       };
       results.summary.offline++;
     }

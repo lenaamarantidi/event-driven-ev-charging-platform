@@ -40,7 +40,7 @@ const PORT = process.env.PORT || 3200;
 app.get('/health', (req, res) => {
   res.status(200).json({
     status: 'healthy',
-    timestamp: new Date().toISOString(),
+    timestamp: new Date().toLocaleString('el-GR', { timeZone: 'Europe/Athens', hour12: false }),
     service: 'Provider API Service',
     version: '1.0.0'
   });
@@ -171,7 +171,7 @@ app.get('/docs/:provider_name.yaml', (req, res) => {
   res.setHeader('Content-Type', 'application/yaml');
   res.status(200).send(`# OpenAPI 3.1.0
 # Provider: ${provider_name}
-# Generated: ${new Date().toISOString()}`);
+# Generated: ${new Date().toLocaleString('el-GR', { timeZone: 'Europe/Athens', hour12: false })}`);
 });
 
 /**

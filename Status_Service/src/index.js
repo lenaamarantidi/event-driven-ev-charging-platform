@@ -96,7 +96,7 @@ app.get('/api/status', async (req, res) => {
           online: true,
           total_points: points.length,
           by_status: byStatus,
-          timestamp: new Date().toISOString()
+          timestamp: new Date().toLocaleString('el-GR', { timeZone: 'Europe/Athens', hour12: false })
         };
 
         console.log(`✓ ${providerName}: ${points.length} points`);
@@ -105,7 +105,7 @@ app.get('/api/status', async (req, res) => {
         results[providerName] = {
           online: false,
           error: error.message,
-          timestamp: new Date().toISOString()
+          timestamp: new Date().toLocaleString('el-GR', { timeZone: 'Europe/Athens', hour12: false })
         };
       }
     }
@@ -191,7 +191,7 @@ app.get('/api/status/ping', (req, res) => {
     res.json({
       message: 'Pong',
       configured_providers: providers,
-      timestamp: new Date().toISOString()
+      timestamp: new Date().toLocaleString('el-GR', { timeZone: 'Europe/Athens', hour12: false })
     });
   } catch (error) {
     res.status(500).json({ error: 'Ping failed' });

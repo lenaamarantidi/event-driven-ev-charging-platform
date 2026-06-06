@@ -135,7 +135,7 @@ function scheduleProviderSync(provider) {
   console.log(`⏰ Scheduling ${provider} sync at: ${cronTime}`);
 
   const job = schedule.scheduleJob(cronTime, async () => {
-    console.log(`\n📅 [${new Date().toISOString()}] Starting scheduled sync for ${provider}...`);
+    console.log(`\n📅 [${new Date().toLocaleString('el-GR', { timeZone: 'Europe/Athens', hour12: false })}] Starting scheduled sync for ${provider}...`);
 
     try {
       const result = await triggerPointsSync(provider);

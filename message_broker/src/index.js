@@ -252,7 +252,7 @@ function buildCanonicalEvent(inputEventType, data, sourceService, correlationId)
   const eventType = normalizeEventType(inputEventType);
   const catalog = EVENT_CATALOG[eventType];
   const critical = catalog ? catalog.critical : false;
-  const timestamp = new Date().toISOString();
+  const timestamp = new Date().toLocaleString('el-GR', { timeZone: 'Europe/Athens', hour12: false });
 
   return {
     eventId: randomId('evt'),
@@ -626,7 +626,7 @@ app.get('/api/events/history', (req, res) => {
     res.json({
       count: history.length,
       events: history,
-      timestamp: new Date().toISOString()
+      timestamp: new Date().toLocaleString('el-GR', { timeZone: 'Europe/Athens', hour12: false })
     });
   } catch (error) {
     console.error('Error retrieving history:', error.message);
@@ -638,7 +638,7 @@ app.get('/api/events/stats', (req, res) => {
   try {
     res.json({
       ...buildStats(),
-      timestamp: new Date().toISOString()
+      timestamp: new Date().toLocaleString('el-GR', { timeZone: 'Europe/Athens', hour12: false })
     });
   } catch (error) {
     console.error('Error retrieving stats:', error.message);

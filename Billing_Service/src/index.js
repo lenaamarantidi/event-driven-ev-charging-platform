@@ -30,7 +30,7 @@ app.use(express.json());
 
 // Request logging middleware
 app.use((req, res, next) => {
-  console.log(`[${new Date().toISOString()}] ${req.method} ${req.path}`);
+  console.log(`[${new Date().toLocaleString('el-GR', { timeZone: 'Europe/Athens', hour12: false })}] ${req.method} ${req.path}`);
   next();
 });
 

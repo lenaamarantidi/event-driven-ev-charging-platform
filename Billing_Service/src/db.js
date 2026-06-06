@@ -31,17 +31,19 @@ async function initializeDatabase() {
       CREATE TABLE IF NOT EXISTS billable_events (
         event_id INT(10) UNSIGNED PRIMARY KEY AUTO_INCREMENT,
         provider_id INT(10) UNSIGNED NOT NULL,
-        reservation_id INT(10) UNSIGNED NOT NULL,
+        reservation_id VARCHAR(255) NOT NULL COMMENT 'Reservation UUID from Reservation_Service',
         amount DECIMAL(10, 2) NOT NULL COMMENT 'Amount in EUR',
         event_type VARCHAR(50) DEFAULT 'reservation' COMMENT 'reservation, charging, etc.',
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
         billing_month DATE NOT NULL COMMENT 'First day of the month for aggregation',
+        UNIQUE KEY uq_provider_reservation (provider_id, reservation_id),
         INDEX idx_provider_id (provider_id),
         INDEX idx_reservation_id (reservation_id),
         INDEX idx_billing_month (billing_month),
         INDEX idx_provider_month (provider_id, billing_month)
       ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
-    `);
+    `)
+
 
     // Create invoices table
     await connection.query(`
@@ -101,6 +103,26 @@ async function initializeDatabase() {
       INSERT IGNORE INTO pricing_config (cost_per_reservation, cost_per_charging_hour, setup_fee, active)
       VALUES (0.50, 1.00, 0.00, 1);
     `);
+
+    // Create payment_history table
+    await connection.query(`
+      CREATE TABLE IF NOT EXISTS payment_history (
+        payment_id INT(10) UNSIGNED PRIMARY KEY AUTO_INCREMENT,
+        invoice_id INT(10) UNSIGNED NOT NULL,
+        provider_id INT(10) UNSIGNED NOT NULL,
+        amount DECIMAL(15, 2) NOT NULL,
+        payment_method VARCHAR(50) NOT NULL DEFAULT 'bank_transfer',
+        reference VARCHAR(255) NULL,
+        status VARCHAR(50) NOT NULL DEFAULT 'completed' COMMENT 'completed, pending, failed',
+        notes VARCHAR(500) NULL,
+        paid_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE KEY uq_invoice_completed_payment (invoice_id, status),
+        INDEX idx_provider_id (provider_id),
+        INDEX idx_paid_at (paid_at),
+        INDEX idx_reference (reference)
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+    `);
+
 
     connection.release();
     console.log('Database schema initialized successfully');

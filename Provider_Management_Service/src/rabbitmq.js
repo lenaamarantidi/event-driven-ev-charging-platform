@@ -53,7 +53,7 @@ async function publishProviderRegistered(providerData) {
   try {
     const message = JSON.stringify({
       eventType: 'provider.registered',
-      timestamp: new Date().toISOString(),
+      timestamp: new Date().toLocaleString('el-GR', { timeZone: 'Europe/Athens', hour12: false }),
       data: {
         providerId: providerData.provider_id,
         providerName: providerData.provider_name,

@@ -14,7 +14,7 @@ async function publishTest() {
     const message = {
       eventType: 'reservation_successful',
       type: 'reservation_successful',
-      timestamp: new Date().toISOString(),
+      timestamp: new Date().toLocaleString('el-GR', { timeZone: 'Europe/Athens', hour12: false }),
       data: {
         reservationId: 'test-res-123',
         providerId: 42,

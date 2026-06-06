@@ -427,7 +427,7 @@ app.get('/auth/health', async (req, res) => {
       service: 'Auth Service',
       port: PORT,
       totalUsers: Number(rows[0].total_users || 0),
-      timestamp: new Date().toISOString()
+      timestamp: new Date().toLocaleString('el-GR', { timeZone: 'Europe/Athens', hour12: false })
     });
   } catch (err) {
     return res.status(503).json({ status: 'error', service: 'Auth Service', message: err.message });

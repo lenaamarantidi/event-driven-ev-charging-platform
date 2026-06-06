@@ -22,7 +22,7 @@ function getCurrentMonthBillingPeriod() {
     startDate,
     endDate,
     dueDate,
-    periodStr: startDate.toISOString().split('T')[0]
+    periodStr: new Date(startDate).toLocaleDateString('el-GR')
   };
 }
 
@@ -71,44 +71,63 @@ async function getProviderInvoice(req, res) {
       const taxAmount = totalAmount * 0.21; // 21% VAT
       const grandTotal = totalAmount + taxAmount;
 
-      // Create invoice record
-      const [result] = await pool.query(
-        `INSERT INTO invoices (provider_id, billing_period_start, billing_period_end, total_amount, tax_amount, grand_total, due_date, event_count, status)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'draft')`,
-        [
-          parsedProviderId,
-          billing.startDate,
-          billing.endDate,
-          totalAmount,
-          taxAmount,
-          grandTotal,
-          billing.dueDate,
-          eventCount
-        ]
-      );
-
-      // Fetch the created invoice
-      const [invoices] = await pool.query(
-        'SELECT * FROM invoices WHERE invoice_id = ?',
-        [result.insertId]
-      );
-
-      invoice = invoices[0];
-
-      // Create line item
-      if (eventCount > 0) {
-        await pool.query(
-          `INSERT INTO invoice_line_items (invoice_id, description, quantity, unit_price, line_total)
-           VALUES (?, ?, ?, ?, ?)`,
+    // Create invoice record
+      let result;
+      try {
+        [result] = await pool.query(
+          `INSERT INTO invoices (provider_id, billing_period_start, billing_period_end, total_amount, tax_amount, grand_total, due_date, event_count, status)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'draft')`,
           [
-            result.insertId,
-            `Reservation Services (${eventCount} reservations)`,
-            eventCount,
-            totalAmount / eventCount,
-            totalAmount
+            parsedProviderId,
+            billing.startDate,
+            billing.endDate,
+            totalAmount,
+            taxAmount,
+            grandTotal,
+            billing.dueDate,
+            eventCount
           ]
         );
+      } catch (e) {
+        // Unique constraint race: invoice got created concurrently. Fetch it.
+        if (e && (e.code === 'ER_DUP_ENTRY' || String(e.message || '').toLowerCase().includes('duplicate'))) {
+          const [existingAfterInsert] = await pool.query(
+            `SELECT * FROM invoices 
+             WHERE provider_id = ? AND billing_period_start = ? AND billing_period_end = ?`,
+            [parsedProviderId, billing.startDate, billing.endDate]
+          );
+          invoice = existingAfterInsert[0];
+        } else {
+          throw e;
+        }
       }
+
+
+      if (!invoice) {
+        // Fetch the created invoice
+        const [invoices] = await pool.query(
+          'SELECT * FROM invoices WHERE invoice_id = ?',
+          [result.insertId]
+        );
+
+        invoice = invoices[0];
+
+        // Create line item
+        if (eventCount > 0) {
+          await pool.query(
+            `INSERT INTO invoice_line_items (invoice_id, description, quantity, unit_price, line_total)
+             VALUES (?, ?, ?, ?, ?)`,
+            [
+              result.insertId,
+              `Reservation Services (${eventCount} reservations)`,
+              eventCount,
+              totalAmount / eventCount,
+              totalAmount
+            ]
+          );
+        }
+      }
+
     }
 
     // Fetch line items
@@ -121,8 +140,8 @@ async function getProviderInvoice(req, res) {
       invoice_id: invoice.invoice_id,
       provider_id: invoice.provider_id,
       billing_period: {
-        start: invoice.billing_period_start.toISOString().split('T')[0],
-        end: invoice.billing_period_end.toISOString().split('T')[0]
+        start: new Date(invoice.billing_period_start).toLocaleDateString('el-GR'),
+        end: new Date(invoice.billing_period_end).toLocaleDateString('el-GR')
       },
       summary: {
         subtotal: parseFloat(invoice.total_amount),
@@ -139,11 +158,11 @@ async function getProviderInvoice(req, res) {
       metadata: {
         status: invoice.status,
         event_count: invoice.event_count,
-        issued_at: invoice.issued_at.toISOString(),
-        due_date: invoice.due_date.toISOString().split('T')[0],
-        paid_at: invoice.paid_at ? invoice.paid_at.toISOString() : null
+        issued_at: new Date(invoice.issued_at).toLocaleString('el-GR', { timeZone: 'Europe/Athens', hour12: false }),
+        due_date: new Date(invoice.due_date).toLocaleDateString('el-GR'),
+        paid_at: invoice.paid_at ? new Date(invoice.paid_at).toLocaleString('el-GR', { timeZone: 'Europe/Athens', hour12: false }) : null
       },
-      timestamp: new Date().toISOString()
+      timestamp: new Date().toLocaleString('el-GR', { timeZone: 'Europe/Athens', hour12: false })
     });
   } catch (err) {
     console.error('Error in getProviderInvoice:', err.message);
@@ -191,16 +210,16 @@ async function getProviderInvoices(req, res) {
       total_invoices: invoices.length,
       invoices: invoices.map(inv => ({
         invoice_id: inv.invoice_id,
-        billing_period_start: inv.billing_period_start.toISOString().split('T')[0],
-        billing_period_end: inv.billing_period_end.toISOString().split('T')[0],
+        billing_period_start: new Date(inv.billing_period_start).toLocaleDateString('el-GR'),
+        billing_period_end: new Date(inv.billing_period_end).toLocaleDateString('el-GR'),
         total_amount: parseFloat(inv.total_amount),
         grand_total: parseFloat(inv.grand_total),
         status: inv.status,
-        issued_at: inv.issued_at.toISOString().split('T')[0],
-        due_date: inv.due_date.toISOString().split('T')[0],
+        issued_at: new Date(inv.issued_at).toLocaleDateString('el-GR'),
+        due_date: new Date(inv.due_date).toLocaleDateString('el-GR'),
         event_count: inv.event_count
       })),
-      timestamp: new Date().toISOString()
+      timestamp: new Date().toLocaleString('el-GR', { timeZone: 'Europe/Athens', hour12: false })
     });
   } catch (err) {
     console.error('Error in getProviderInvoices:', err.message);
@@ -258,7 +277,7 @@ async function markInvoicePaid(req, res) {
       invoice: {
         invoice_id: invoice.invoice_id,
         status: invoice.status,
-        paid_at: invoice.paid_at.toISOString()
+        paid_at: new Date(invoice.paid_at).toLocaleString('el-GR', { timeZone: 'Europe/Athens', hour12: false })
       }
     });
   } catch (err) {
@@ -315,7 +334,7 @@ async function getBillingSummary(req, res) {
         recent_billable_events: recentEvents[0].count || 0,
         recent_events_total: parseFloat(recentEvents[0].total || 0)
       },
-      timestamp: new Date().toISOString()
+      timestamp: new Date().toLocaleString('el-GR', { timeZone: 'Europe/Athens', hour12: false })
     });
   } catch (err) {
     console.error('Error in getBillingSummary:', err.message);
@@ -341,7 +360,7 @@ async function healthCheck(req, res) {
       database: process.env.DB_NAME || 'billing_db',
       totalBillableEvents: Number(countEvents[0].total || 0),
       totalInvoices: Number(countInvoices[0].total || 0),
-      timestamp: new Date().toISOString()
+      timestamp: new Date().toLocaleString('el-GR', { timeZone: 'Europe/Athens', hour12: false })
     });
   } catch (err) {
     return res.status(503).json({
@@ -389,7 +408,7 @@ async function processPayment(req, res) {
     if (invoice.status === 'paid') {
       return res.status(400).json({
         error: 'Invoice already paid',
-        paid_at: invoice.paid_at.toISOString()
+        paid_at: new Date(invoice.paid_at).toLocaleString('el-GR', { timeZone: 'Europe/Athens', hour12: false })
       });
     }
 
@@ -402,7 +421,7 @@ async function processPayment(req, res) {
       ['paid', parsedInvoiceId]
     );
 
-    // Create payment record if payment_history table exists
+    // Create payment record (idempotent for same invoice)
     try {
       await pool.query(
         `INSERT INTO payment_history (invoice_id, provider_id, amount, payment_method, reference, status, notes, paid_at)
@@ -418,8 +437,14 @@ async function processPayment(req, res) {
         ]
       );
     } catch (e) {
-      console.warn('Payment history table not found, skipping record creation');
+      // If payment_history exists but duplicate insert happens, ignore.
+      if (e && (e.code === 'ER_DUP_ENTRY' || String(e.message || '').toLowerCase().includes('duplicate'))) {
+        console.log('Duplicate payment_history insert ignored');
+      } else {
+        console.warn('Failed to insert payment_history record:', e.message);
+      }
     }
+
 
     const [updatedInvoices] = await pool.query(
       'SELECT * FROM invoices WHERE invoice_id = ?',
@@ -439,10 +464,10 @@ async function processPayment(req, res) {
         status: updatedInvoice.status,
         payment_method: paymentMethod,
         reference: reference || null,
-        paid_at: updatedInvoice.paid_at.toISOString(),
+        paid_at: new Date(updatedInvoice.paid_at).toLocaleString('el-GR', { timeZone: 'Europe/Athens', hour12: false }),
         was_overdue: isOverdue
       },
-      timestamp: new Date().toISOString()
+      timestamp: new Date().toLocaleString('el-GR', { timeZone: 'Europe/Athens', hour12: false })
     });
 
   } catch (err) {
@@ -532,10 +557,10 @@ async function getProviderPaymentHistory(req, res) {
         payment_method: p.payment_method || 'unknown',
         reference: p.reference,
         status: p.status,
-        paid_at: p.paid_at ? (p.paid_at instanceof Date ? p.paid_at.toISOString() : p.paid_at) : null,
+        paid_at: p.paid_at ? (p.paid_at instanceof Date ? new Date(p.paid_at).toLocaleString('el-GR', { timeZone: 'Europe/Athens', hour12: false }) : new Date(p.paid_at).toLocaleString('el-GR', { timeZone: 'Europe/Athens', hour12: false })) : null,
         notes: p.notes
       })),
-      timestamp: new Date().toISOString()
+      timestamp: new Date().toLocaleString('el-GR', { timeZone: 'Europe/Athens', hour12: false })
     });
 
   } catch (err) {
@@ -585,12 +610,12 @@ async function getOutstandingInvoices(req, res) {
         invoice_id: inv.invoice_id,
         amount: parseFloat(inv.grand_total),
         status: inv.status,
-        due_date: inv.due_date.toISOString().split('T')[0],
-        issued_at: inv.issued_at.toISOString().split('T')[0],
+        due_date: new Date(inv.due_date).toLocaleDateString('el-GR'),
+        issued_at: new Date(inv.issued_at).toLocaleDateString('el-GR'),
         days_overdue: new Date() > new Date(inv.due_date) ? Math.floor((new Date() - new Date(inv.due_date)) / (1000 * 60 * 60 * 24)) : 0
       })),
       currency: 'EUR',
-      timestamp: new Date().toISOString()
+      timestamp: new Date().toLocaleString('el-GR', { timeZone: 'Europe/Athens', hour12: false })
     });
 
   } catch (err) {

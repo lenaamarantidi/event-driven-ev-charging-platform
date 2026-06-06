@@ -258,7 +258,7 @@ app.get('/api/payments/status/summary', async (req, res) => {
 
     return res.json({
       summary: rows,
-      timestamp: new Date().toISOString()
+      timestamp: new Date().toLocaleString('el-GR', { timeZone: 'Europe/Athens', hour12: false })
     });
   } catch (err) {
     return res.status(500).json({
@@ -279,7 +279,7 @@ app.get('/health', async (req, res) => {
       port: PORT,
       database: DB_NAME,
       totalPayments: Number(countRows[0].total || 0),
-      timestamp: new Date().toISOString()
+      timestamp: new Date().toLocaleString('el-GR', { timeZone: 'Europe/Athens', hour12: false })
     });
   } catch (err) {
     return res.status(503).json({

@@ -93,7 +93,7 @@ async function handleAnalyticsEvent(msg) {
       try {
         fs.mkdirSync('logs', { recursive: true });
         const dump = {
-          ts: new Date().toISOString(),
+          ts: new Date().toLocaleString('el-GR', { timeZone: 'Europe/Athens', hour12: false }),
           properties: msg.properties || {},
           utf8: content,
           base64: raw ? raw.toString('base64') : null,
@@ -122,7 +122,7 @@ async function handleAnalyticsEvent(msg) {
     const { data } = event;
     const providerId = data.providerId || data.provider_id || data.event_metadata?.provider_id;
     let actionType = event.eventType;
-    const timestamp = event.timestamp || data.timestamp || new Date().toISOString();
+    const timestamp = event.timestamp || data.timestamp || new Date().toLocaleString('el-GR', { timeZone: 'Europe/Athens', hour12: false });
 
     if (!providerId) {
       console.error('Event missing providerId:', event);
@@ -153,7 +153,7 @@ async function handleAnalyticsEvent(msg) {
 
     // Update daily analytics
     const date = new Date(timestamp);
-    const dateStr = date.toISOString().split('T')[0];
+    const dateStr = new Date(date).toLocaleDateString('el-GR');
 
     const countField = actionType === 'point_viewed' ? 'point_views_count' :
                        actionType === 'reservation_made' ? 'reservations_count' :

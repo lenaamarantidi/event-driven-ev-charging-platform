@@ -190,7 +190,9 @@ services:
     image: mariadb:11
     container_name: saasplug-mariadb-provider
     environment:
+      TZ: Europe/Athens
       MYSQL_ROOT_PASSWORD: root
+
       MYSQL_DATABASE: provider_db
       MYSQL_USER: provider_user
       MYSQL_PASSWORD: provider_pass
@@ -275,9 +277,9 @@ services:
       context: ./Billing_Service
     container_name: saasplug-billing
     ports:
-      - "3108:3108"
+      - "3103:3103"
     environment:
-      PORT: 3108
+      PORT: 3103
       NODE_ENV: production
       DB_HOST: mariadb-billing
       DB_PORT: 3306

@@ -24,7 +24,7 @@ const PORT = process.env.PORT || 3009;
 // ============== MIDDLEWARE ==============
 
 app.use((req, res, next) => {
-  console.log(`[${new Date().toISOString()}] ${req.method} ${req.path}`);
+  console.log(`[${new Date().toLocaleString('el-GR', { timeZone: 'Europe/Athens', hour12: false })}] ${req.method} ${req.path}`);
   next();
 });
 
@@ -38,7 +38,7 @@ app.get('/health', (req, res) => {
     status: 'ok',
     service: 'Reservation_Service',
     port: PORT,
-    timestamp: new Date().toISOString()
+    timestamp: new Date().toLocaleString('el-GR', { timeZone: 'Europe/Athens', hour12: false })
   });
 });
 
@@ -96,7 +96,7 @@ app.post('/api/reserve', async (req, res) => {
         providerName,
         pointId,
         duration,
-        timestamp: new Date().toISOString()
+        timestamp: new Date().toLocaleString('el-GR', { timeZone: 'Europe/Athens', hour12: false })
       });
       console.log(`[RABBITMQ] Event published for reservation ${reservationId}`);
     } catch (rabbitmqError) {
