@@ -507,28 +507,7 @@ services:
       - saasplug-network
     restart: unless-stopped
 
-  # Sync Service (no port, runs as background worker)
-  sync-service:
-    build:
-      context: ./Collector_Service
-    container_name: saasplug-sync
-    environment:
-      NODE_ENV: production
-      DB_HOST: mysql-central
-      DB_USER: root
-      DB_PASSWORD: root
-      RABBITMQ_URL: amqp://guest:guest@rabbitmq:5672
-      REDPLUG_API_URL: https://davinci.softlab.ntua.gr/saas26/redPlug/api
-      GREENPLUG_API_URL: https://davinci.softlab.ntua.gr/saas26/greenPlug/api
-      BLUEPLUG_API_URL: https://davinci.softlab.ntua.gr/saas26/bluePlug/api
-    depends_on:
-      rabbitmq:
-        condition: service_healthy
-      mysql-central:
-        condition: service_healthy
-    networks:
-      - saasplug-network
-    restart: unless-stopped
+
 
   # Provider API Service (OpenAPI 3.1.0)
   # Provider Adapter services (one per provider)
