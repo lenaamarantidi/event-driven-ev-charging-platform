@@ -1,0 +1,23 @@
+services:
+  map-ui-service:
+    image: maps_ui_service:latest
+    container_name: maps-ui-service
+    ports:
+      - "${MAPS_UI_PORT}:${MAPS_UI_PORT}"
+    environment:
+      PORT: ${MAPS_UI_PORT}
+      NODE_ENV: production
+    command: node src/index.js
+    volumes:
+      - map-ui-service-data:/app/data
+    networks:
+      - saasplug-network
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+
+networks:
+  saasplug-network:
+    driver: bridge
+
+volumes:
+  map-ui-service-data:

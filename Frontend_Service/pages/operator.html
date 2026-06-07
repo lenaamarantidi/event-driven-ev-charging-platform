@@ -1,0 +1,159 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>SaaS Plug Operator Dashboard - Charger.io</title>
+  <style>
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+      font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+    }
+    body {
+      background: linear-gradient(135deg, #1e3c72 0%, #2a5298 100%);
+      min-height: 100vh;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      padding: 20px;
+    }
+    .container {
+      background: white;
+      border-radius: 20px;
+      box-shadow: 0 20px 40px rgba(0,0,0,0.3);
+      width: 100%;
+      max-width: 1200px;
+      padding: 50px;
+      text-align: center;
+    }
+    .header {
+      margin-bottom: 40px;
+    }
+    .header h1 {
+      color: #1e3c72;
+      font-size: 3rem;
+      margin-bottom: 15px;
+      font-weight: 800;
+    }
+    .header p {
+      color: #666;
+      font-size: 1.2rem;
+    }
+    .title-display {
+      background: linear-gradient(135deg, #1e3c72 0%, #2a5298 100%);
+      color: white;
+      padding: 40px;
+      border-radius: 15px;
+      margin: 30px 0;
+    }
+    .title-display h2 {
+      font-size: 2.5rem;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 2px;
+    }
+    .stats-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+      gap: 20px;
+      margin-top: 40px;
+    }
+    .stat-card {
+      background: linear-gradient(135deg, #1e3c72 0%, #2a5298 100%);
+      color: white;
+      padding: 30px;
+      border-radius: 15px;
+      text-align: center;
+      box-shadow: 0 5px 15px rgba(0,0,0,0.2);
+    }
+    .stat-card h3 {
+      font-size: 3rem;
+      margin-bottom: 10px;
+      font-weight: 800;
+    }
+    .stat-card p {
+      opacity: 0.95;
+      font-size: 1rem;
+    }
+    .controls {
+      display: flex;
+      justify-content: center;
+      gap: 15px;
+      margin-top: 40px;
+    }
+    .btn {
+      padding: 15px 40px;
+      background: linear-gradient(135deg, #1e3c72 0%, #2a5298 100%);
+      color: white;
+      border: none;
+      border-radius: 25px;
+      font-size: 1rem;
+      font-weight: 600;
+      cursor: pointer;
+      transition: all 0.3s;
+    }
+    .btn:hover {
+      transform: translateY(-3px);
+      box-shadow: 0 8px 20px rgba(0,0,0,0.3);
+    }
+    .footer {
+      margin-top: 40px;
+      padding-top: 20px;
+      border-top: 2px solid #e0e0e0;
+      color: #999;
+    }
+    .footer p {
+      font-size: 0.9rem;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="header">
+      <h1>SaaS Plug Operator</h1>
+      <p>Charger.io Management Dashboard</p>
+    </div>
+    
+    <div class="title-display">
+      <h2>SaaS Plug Operator Dashboard</h2>
+    </div>
+    
+    <div class="stats-grid">
+      <div class="stat-card">
+        <h3>1,247</h3>
+        <p>Active Users</p>
+      </div>
+      <div class="stat-card">
+        <h3>342</h3>
+        <p>Connected Stations</p>
+      </div>
+      <div class="stat-card">
+        <h3>12.4K</h3>
+        <p>Monthly Sessions</p>
+      </div>
+      <div class="stat-card">
+        <h3>98.7%</h3>
+        <p>Uptime</p>
+      </div>
+    </div>
+    
+    <div class="controls">
+      <button class="btn" onclick="showAlert('Users')">Manage Users</button>
+      <button class="btn" onclick="showAlert('Stations')">Manage Stations</button>
+      <button class="btn" onclick="showAlert('Reports')">View Reports</button>
+    </div>
+    
+    <div class="footer">
+      <p>© 2024 Charger.io | Operator Dashboard v2.1.0</p>
+    </div>
+  </div>
+  
+  <script>
+    function showAlert(section) {
+      alert('Navigating to ' + section + ' Management');
+    }
+  </script>
+</body>
+</html>
