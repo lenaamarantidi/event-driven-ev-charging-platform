@@ -11,8 +11,8 @@ app.use(express.json());
 const PORT = Number(process.env.PORT || 8000);
 const AUTH_SERVICE_URL = process.env.AUTH_SERVICE_URL || 'http://localhost:3100';
 
-function rewritePath(req) {
-  return `/auth${req.url}`;
+function stripApiPrefix(req) {
+  return req.url.replace(/^\/api/, '');
 }
 
 app.get('/', (req, res) => {
@@ -26,7 +26,7 @@ app.get('/', (req, res) => {
 });
 
 app.use('/api/auth', proxy(AUTH_SERVICE_URL, {
-  proxyReqPathResolver: (req) => rewritePath(req)
+  proxyReqPathResolver: (req) => stripApiPrefix(req)
 }));
 
 app.get('/health', (req, res) => {
