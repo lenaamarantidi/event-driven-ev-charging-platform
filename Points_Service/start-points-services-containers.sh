@@ -92,6 +92,10 @@ export POINTS_CENTRAL_MARIADB_PORT=${ports[3]}
 export MARIADB_HOST=host.docker.internal
 export BEARER_TOKEN=sk_saas_5dec282b47047b6eced41e64
 
+# Always rebuild image with no cache (like docker build --no-cache -t points_service:latest .)
+echo "Building points_service:latest image..."
+docker build --no-cache -t points_service:latest .
+
 docker compose -f docker-compose.points.services.yml up -d
 
 
