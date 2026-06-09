@@ -1,0 +1,208 @@
+{
+  "info": {
+    "name": "new_postman_collection_test",
+    "description": "End-to-end Postman collection for the local SaaS Plug system: Gateway/Points/Status/Reservation + Adapters + External Davinci provider APIs.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    { "key": "gateway_url", "value": "http://localhost:8000" },
+    { "key": "provider_mgmt_url", "value": "http://localhost:3105" },
+    { "key": "analytics_url", "value": "http://localhost:3102" },
+    { "key": "billing_url", "value": "http://localhost:3103" },
+    { "key": "reservation_url", "value": "http://localhost:3009" },
+    { "key": "points_url", "value": "http://localhost:3001" },
+    { "key": "status_url", "value": "http://localhost:3002" },
+    { "key": "red_adapter_url", "value": "http://localhost:3111" },
+    { "key": "green_adapter_url", "value": "http://localhost:3112" },
+    { "key": "blue_adapter_url", "value": "http://localhost:3113" },
+
+    { "key": "davinci_provider_base", "value": "https://davinci.softlab.ntua.gr/saas26" },
+
+    { "key": "red_base", "value": "{{davinci_provider_base}}/redPlug/api" },
+    { "key": "green_base", "value": "{{davinci_provider_base}}/greenPlug/api" },
+    { "key": "blue_base", "value": "{{davinci_provider_base}}/bluePlug/api" },
+
+    { "key": "providerId", "value": "1" },
+    { "key": "pointId", "value": "1" },
+    { "key": "minutes", "value": "30" },
+    { "key": "reservationId", "value": "RES-001" },
+    { "key": "invoiceId", "value": "INV-001" }
+  ],
+  "item": [
+    {
+      "name": "A) Health checks (local)",
+      "item": [
+        {
+          "name": "Gateway /health",
+          "request": { "method": "GET", "url": { "raw": "{{gateway_url}}/health", "host": ["{{gateway_url}}"], "path": ["health"] } }
+        },
+        {
+          "name": "Points /health",
+          "request": { "method": "GET", "url": { "raw": "{{points_url}}/health", "host": ["{{points_url}}"], "path": ["health"] } }
+        },
+        {
+          "name": "Status Service /api/status/ping",
+          "request": { "method": "GET", "url": { "raw": "{{status_url}}/api/status/ping", "host": ["{{status_url}}"], "path": ["api", "status", "ping"] } }
+        },
+        {
+          "name": "Reservation Service /health",
+          "request": { "method": "GET", "url": { "raw": "{{reservation_url}}/health", "host": ["{{reservation_url}}"], "path": ["health"] } }
+        },
+        {
+          "name": "Provider Management /health",
+          "request": { "method": "GET", "url": { "raw": "{{provider_mgmt_url}}/health", "host": ["{{provider_mgmt_url}}"], "path": ["health"] } }
+        },
+        {
+          "name": "Analytics /health",
+          "request": { "method": "GET", "url": { "raw": "{{analytics_url}}/health", "host": ["{{analytics_url}}"], "path": ["health"] } }
+        },
+        {
+          "name": "Billing /health",
+          "request": { "method": "GET", "url": { "raw": "{{billing_url}}/health", "host": ["{{billing_url}}"], "path": ["health"] } }
+        }
+      ]
+    },
+
+    {
+      "name": "B) Points Service (local)",
+      "item": [
+        { "name": "GET /api/points", "request": { "method": "GET", "url": "{{points_url}}/api/points" } },
+        { "name": "GET /api/points?provider=redPlug", "request": { "method": "GET", "url": "{{points_url}}/api/points?provider=redPlug" } },
+        { "name": "GET /api/points/:pointId", "request": { "method": "GET", "url": "{{points_url}}/api/points/{{pointId}}" } }
+      ]
+    },
+
+    {
+      "name": "C) Provider Adapters (local)",
+      "item": [
+        {
+          "name": "redPlug adapter",
+          "item": [
+            { "name": "GET /api/points", "request": { "method": "GET", "url": "{{red_adapter_url}}/api/points" } },
+            { "name": "GET /api/points/:pointId", "request": { "method": "GET", "url": "{{red_adapter_url}}/api/points/{{pointId}}" } },
+            {
+              "name": "POST /api/reserve",
+              "request": {
+                "method": "POST",
+                "header": [{ "key": "Content-Type", "value": "application/json" }],
+                "body": { "mode": "raw", "raw": "{\n  \"pointId\": \"{{pointId}}\",\n  \"duration\": {{minutes}}\n}" },
+                "url": "{{red_adapter_url}}/api/reserve"
+              }
+            }
+          ]
+        },
+        {
+          "name": "greenPlug adapter",
+          "item": [
+            { "name": "GET /api/points", "request": { "method": "GET", "url": "{{green_adapter_url}}/api/points" } },
+            { "name": "GET /api/points/:pointId", "request": { "method": "GET", "url": "{{green_adapter_url}}/api/points/{{pointId}}" } },
+            {
+              "name": "POST /api/reserve",
+              "request": {
+                "method": "POST",
+                "header": [{ "key": "Content-Type", "value": "application/json" }],
+                "body": { "mode": "raw", "raw": "{\n  \"pointId\": \"{{pointId}}\",\n  \"duration\": {{minutes}}\n}" },
+                "url": "{{green_adapter_url}}/api/reserve"
+              }
+            }
+          ]
+        },
+        {
+          "name": "bluePlug adapter",
+          "item": [
+            { "name": "GET /api/points", "request": { "method": "GET", "url": "{{blue_adapter_url}}/api/points" } },
+            { "name": "GET /api/points/:pointId", "request": { "method": "GET", "url": "{{blue_adapter_url}}/api/points/{{pointId}}" } },
+            {
+              "name": "POST /api/reserve (unified)",
+              "request": {
+                "method": "POST",
+                "header": [{ "key": "Content-Type", "value": "application/json" }],
+                "body": { "mode": "raw", "raw": "{\n  \"pointId\": \"{{pointId}}\",\n  \"duration\": {{minutes}}\n}" },
+                "url": "{{blue_adapter_url}}/api/reserve"
+              }
+            },
+            { "name": "POST /api/location/:pointid/hold?minutes=... (direct hold)", "request": { "method": "POST", "url": "{{blue_adapter_url}}/api/location/{{pointId}}/hold?minutes={{minutes}}" } }
+          ]
+        }
+      ]
+    },
+
+    {
+      "name": "D) Reservation Service (local)",
+      "item": [
+        {
+          "name": "POST /api/reserve (reservation unified)",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{\n  \"providerName\": \"redPlug\",\n  \"pointId\": \"{{pointId}}\",\n  \"duration\": {{minutes}},\n  \"userId\": \"user123\"\n}" },
+            "url": "{{reservation_url}}/api/reserve"
+          }
+        },
+        { "name": "GET /api/reservations", "request": { "method": "GET", "url": "{{reservation_url}}/api/reservations" } },
+        { "name": "GET /api/reservations/:reservationId", "request": { "method": "GET", "url": "{{reservation_url}}/api/reservations/{{reservationId}}" } }
+      ]
+    },
+
+    {
+      "name": "E) Billing / Payments (local)",
+      "item": [
+        { "name": "GET /api/billing/invoice/:providerId", "request": { "method": "GET", "url": "{{billing_url}}/api/billing/invoice/{{providerId}}" } },
+        { "name": "GET /api/billing/invoices/:providerId", "request": { "method": "GET", "url": "{{billing_url}}/api/billing/invoices/{{providerId}}" } },
+        { "name": "GET /api/billing/provider/:providerId/payments", "request": { "method": "GET", "url": "{{billing_url}}/api/billing/provider/{{providerId}}/payments" } },
+        { "name": "GET /api/billing/outstanding/:providerId", "request": { "method": "GET", "url": "{{billing_url}}/api/billing/outstanding/{{providerId}}" } },
+        { "name": "GET /api/billing/summary/:providerId", "request": { "method": "GET", "url": "{{billing_url}}/api/billing/summary/{{providerId}}" } },
+        { "name": "POST /api/billing/invoices/:providerId/:invoiceId/mark-paid", "request": { "method": "POST", "url": "{{billing_url}}/api/billing/invoices/{{providerId}}/{{invoiceId}}/mark-paid" } },
+        {
+          "name": "POST /api/billing/invoices/:providerId/:invoiceId/pay (UC07)",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{\n  \"paymentMethod\": \"bank_transfer\",\n  \"reference\": \"{{invoiceId}}-PAY\",\n  \"notes\": \"Postman test\"\n}" },
+            "url": "{{billing_url}}/api/billing/invoices/{{providerId}}/{{invoiceId}}/pay"
+          }
+        }
+      ]
+    },
+
+    {
+      "name": "F) External Davinci provider APIs (contract validation)",
+      "item": [
+        {
+          "name": "redPlug external",
+          "item": [
+            { "name": "GET /points", "request": { "method": "GET", "url": "{{red_base}}/points" } },
+            { "name": "GET /point/:pointid", "request": { "method": "GET", "url": "{{red_base}}/point/{{pointId}}" } },
+            { "name": "POST /reserve/:pointid", "request": { "method": "POST", "url": "{{red_base}}/reserve/{{pointId}}" } },
+            { "name": "POST /reserve/:pointid/:minutes", "request": { "method": "POST", "url": "{{red_base}}/reserve/{{pointId}}/{{minutes}}" } }
+          ]
+        },
+        {
+          "name": "greenPlug external",
+          "item": [
+            { "name": "GET /chargingPoints", "request": { "method": "GET", "url": "{{green_base}}/chargingPoints" } },
+            { "name": "GET /chargingPoints/:pointid", "request": { "method": "GET", "url": "{{green_base}}/chargingPoints/{{pointId}}" } },
+            {
+              "name": "POST /chargingPoints/:pointid/reservations",
+              "request": {
+                "method": "POST",
+                "header": [{ "key": "Content-Type", "value": "application/json" }],
+                "body": { "mode": "raw", "raw": "{\n  \"duration\": {{minutes}}\n}" },
+                "url": "{{green_base}}/chargingPoints/{{pointId}}/reservations"
+              }
+            }
+          ]
+        },
+        {
+          "name": "bluePlug external",
+          "item": [
+            { "name": "GET /locations", "request": { "method": "GET", "url": "{{blue_base}}/locations" } },
+            { "name": "GET /location/:pointid/status", "request": { "method": "GET", "url": "{{blue_base}}/location/{{pointId}}/status" } },
+            { "name": "POST /location/:pointid/hold?minutes=...", "request": { "method": "POST", "url": "{{blue_base}}/location/{{pointId}}/hold?minutes={{minutes}}" } }
+          ]
+        }
+      ]
+    }
+  ]
+}
+

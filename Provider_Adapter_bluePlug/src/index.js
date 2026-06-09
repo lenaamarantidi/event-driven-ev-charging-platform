@@ -74,11 +74,13 @@ app.post('/api/reserve', async (req, res) => {
       return res.status(422).json({ error: 'duration/minutes must be an integer >= 1' });
     }
 
-    console.log(`[BluePlug] Calling: ${BASE_URL}/location/${pointId}/hold with minutes=${minutes}`);
+    // Professor contract: POST /location/:pointid/hold?minutes=<N>
+    console.log(`[BluePlug] Calling: ${BASE_URL}/location/${pointId}/hold?minutes=${minutes}`);
     const data = await proxyRequest(
-      `${BASE_URL}/location/${encodeURIComponent(pointId)}/hold`,
+      `${BASE_URL}/location/${encodeURIComponent(pointId)}/hold?minutes=${encodeURIComponent(String(minutes))}`,
       'post'
     );
+
 
     console.log('[BluePlug] Response:', JSON.stringify(data));
     res.json({ reservation: data });
