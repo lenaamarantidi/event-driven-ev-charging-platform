@@ -10,10 +10,12 @@ const Auth = ({ setToken }) => {
   const handleSubmit = async (e) => {
     e.preventDefault();
     setError('');
-    const endpoint = isLogin ? '/login' : '/signup';
-    
+    // API Gateway exposes auth under /api/auth
+    const endpoint = isLogin ? '/api/auth/login' : '/api/auth/signup';
+
     try {
       const res = await axios.post(`${BASE_URL}${endpoint}`, formData);
+
       if (isLogin) {
         localStorage.setItem('token', res.data.token);
         localStorage.setItem('username', formData.username);

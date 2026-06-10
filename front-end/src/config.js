@@ -5,12 +5,13 @@
  * Κάθε microservice έχει το δικό του URL για απευθείας επικοινωνία
  */
 
-// Service-Specific URLs
+// Service-Specific URLs (matching docker-compose.yml ports)
 export const SERVICES = {
-  providers: 'http://127.0.0.1:3105/api',      // Provider Management Service (UC03)
-  analytics: 'http://127.0.0.1:3102/api',      // Analytics Service (UC04)
-  billing: 'http://127.0.0.1:3103/api',        // Billing Service (UC05)
-  reservations: 'http://127.0.0.1:3106/api'    // Reservation Service (UC01, unified reserve endpoint)
+  providers: 'http://127.0.0.1:3105/api',      // Provider Management Service (UC03) - PORT 3105
+  analytics: 'http://127.0.0.1:3102/api',      // Analytics Service (UC04, UC06) - PORT 3102
+  billing: 'http://127.0.0.1:3103/api',        // Billing Service (UC05) - PORT 3103
+  reservations: 'http://127.0.0.1:3106/api',     // Reservation Service (UC01) - PORT 3106
+  points: 'http://127.0.0.1:3001/api'        // Points Service (central) - PORT 3001
 };
 
 // Legacy fallback (για backward compatibility)
