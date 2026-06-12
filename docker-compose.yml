@@ -382,6 +382,11 @@ services:
       DB_PASSWORD: provider_pass
       DB_NAME: provider_db
       RABBITMQ_URL: amqp://guest:guest@rabbitmq:5672
+    healthcheck:
+      test: ["CMD", "node", "-e", "require('http').get('http://localhost:3101/health', (r) => process.exit(r.statusCode === 200 ? 0 : 1)).on('error', () => process.exit(1))"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
     depends_on:
       mariadb-provider:
         condition: service_healthy
@@ -431,6 +436,11 @@ services:
       DB_NAME: auth_db
       JWT_SECRET: your_jwt_secret_key_change_in_production
       JWT_EXPIRY: 24h
+    healthcheck:
+      test: ["CMD", "node", "-e", "require('http').get('http://localhost:3100/auth/health', (r) => process.exit(r.statusCode === 200 ? 0 : 1)).on('error', () => process.exit(1))"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
     depends_on:
       mariadb-auth:
         condition: service_healthy
@@ -478,6 +488,11 @@ services:
       DB_NAME: analytics_db
       MESSAGE_BROKER_URL: http://message-broker:3003
       RABBITMQ_URL: amqp://guest:guest@rabbitmq:5672
+    healthcheck:
+      test: ["CMD", "node", "-e", "require('http').get('http://localhost:3106/health', (r) => process.exit(r.statusCode === 200 ? 0 : 1)).on('error', () => process.exit(1))"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
     depends_on:
       message-broker:
         condition: service_healthy
@@ -543,6 +558,46 @@ services:
       REDPLUG_BASE_URL: https://davinci.softlab.ntua.gr/saas26/redPlug/api
       GREENPLUG_BASE_URL: https://davinci.softlab.ntua.gr/saas26/greenPlug/api
       BLUEPLUG_BASE_URL: https://davinci.softlab.ntua.gr/saas26/bluePlug/api
+    networks:
+      - saasplug-network
+    restart: unless-stopped
+
+  # API Gateway (Python FastAPI)
+  api-gateway:
+    build:
+      context: ./API_Gateway
+    container_name: saasplug-api-gateway
+    ports:
+      - "8000:8000"
+    environment:
+      PORT: 8000
+      AUTH_SERVICE_URL: http://auth-service:3100
+      PROVIDER_SERVICE_URL: http://provider-management-service:3101
+      POINTS_SERVICE_URL: http://central-service:3001
+      RESERVATION_SERVICE_URL: http://reservation-service:3009
+      BILLING_SERVICE_URL: http://billing-service:3103
+      PAYMENT_SERVICE_URL: http://payment-service:3107
+      ANALYTICS_SERVICE_URL: http://analytics-service:3106
+    depends_on:
+      auth-service:
+        condition: service_healthy
+      provider-management-service:
+        condition: service_healthy
+      central-service:
+        condition: service_healthy
+      reservation-service:
+        condition: service_healthy
+      billing-service:
+        condition: service_healthy
+      payment-service:
+        condition: service_healthy
+      analytics-service:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import httpx; httpx.get('http://localhost:8000/health', timeout=5).raise_for_status()"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
     networks:
       - saasplug-network
     restart: unless-stopped
