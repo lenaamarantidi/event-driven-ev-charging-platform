@@ -15,6 +15,14 @@ const ProviderDashboard = ({ setToken }) => {
   });
   const [selectedStation, setSelectedStation] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [analyticsAnalytics, setAnalyticsAnalytics] = useState(null);
+  const [invoiceLoading, setInvoiceLoading] = useState(false);
+  const [invoiceResult, setInvoiceResult] = useState(null);
+  const [invoiceError, setInvoiceError] = useState('');
+  // UC05: Invoice state
+  const [invoiceData, setInvoiceData] = useState(null);
+  const [invoiceHistory, setInvoiceHistory] = useState([]);
+  const [paymentLoading, setPaymentLoading] = useState(false);
 
   useEffect(() => {
     fetchProviderData();
@@ -36,6 +44,12 @@ const ProviderDashboard = ({ setToken }) => {
       // Κανονικοποίηση δεδομένων analytics
       if (analyticsResult.success) {
         const analyticsData = analyticsResult.data;
+        // UC04: Save analytics summary for display (clicks, views, reservations)
+        setAnalyticsAnalytics(analyticsData.summary || {
+          total_point_views: 0,
+          total_searches: 0,
+          total_reservations: 0
+        });
         setAnalytics({
           totalStations: analyticsData.stations_count || 0,
           activeStations: analyticsData.active_stations || 0,
@@ -73,6 +87,78 @@ const ProviderDashboard = ({ setToken }) => {
     localStorage.removeItem('username');
     localStorage.removeItem('userRole');
     setToken(null);
+  };
+
+  // UC04: Request Invoice
+  const handleRequestInvoice = async () => {
+    try {
+      setInvoiceLoading(true);
+      setInvoiceError('');
+
+      const providerId = localStorage.getItem('providerId') || '1';
+      const result = await billingAPI.getInvoice(providerId);
+
+      if (result.success) {
+        setInvoiceResult(result.data);
+      } else {
+        setInvoiceError(result.error || 'Failed to generate invoice');
+      }
+    } catch (err) {
+      setInvoiceError('Error generating invoice');
+    } finally {
+      setInvoiceLoading(false);
+    }
+  };
+
+  // UC05: Fetch Invoice Data for View Invoice tab
+  const fetchInvoiceData = async () => {
+    try {
+      setInvoiceLoading(true);
+      setInvoiceError('');
+
+      const providerId = localStorage.getItem('providerId') || '1';
+
+      // Get current invoice
+      const result = await billingAPI.getInvoice(providerId);
+      if (result.success) {
+        setInvoiceData(result.data);
+      } else {
+        setInvoiceError(result.error || 'No invoice found');
+      }
+
+      // Get invoice history
+      const historyResult = await billingAPI.getInvoiceHistory(providerId);
+      if (historyResult.success) {
+        setInvoiceHistory(historyResult.data.invoices || []);
+      }
+    } catch (err) {
+      setInvoiceError('Error loading invoice data');
+    } finally {
+      setInvoiceLoading(false);
+    }
+  };
+
+  // UC05: Request Payment (UI only - * as mentioned)
+  const handleRequestPayment = async () => {
+    try {
+      setPaymentLoading(true);
+      const providerId = localStorage.getItem('providerId') || '1';
+
+      // Call payment API (even though implementation may be simplified)
+      const result = await billingAPI.processPayment(providerId, invoiceData.invoice_id, { paymentMethod: 'bank_transfer' });
+
+      if (result.success) {
+        alert('Payment request submitted successfully!');
+        // Refresh invoice data
+        fetchInvoiceData();
+      } else {
+        setInvoiceError(result.error || 'Payment request failed');
+      }
+    } catch (err) {
+      setInvoiceError('Error processing payment request');
+    } finally {
+      setPaymentLoading(false);
+    }
   };
 
   const StatCard = ({ title, value, unit, icon, color }) => (
@@ -144,6 +230,15 @@ const ProviderDashboard = ({ setToken }) => {
               type="button"
             >
               📈 Reports
+            </button>
+          </li>
+          <li className="nav-item" role="presentation">
+            <button
+              className={`nav-link ${activeTab === 'invoices' ? 'active' : ''}`}
+              onClick={() => setActiveTab('invoices')}
+              type="button"
+            >
+              📄 Invoices
             </button>
           </li>
         </ul>
@@ -360,26 +455,58 @@ const ProviderDashboard = ({ setToken }) => {
           </div>
         )}
 
-        {/* Reports Tab */}
+        {/* Reports Tab - UC04: View Own Analytics */}
         {activeTab === 'reports' && (
           <div>
-            <h3 className="mb-4">Reports & Analytics</h3>
+            <h3 className="mb-4">UC04: View Own Analytics</h3>
+
+            {/* Analytics Summary Cards */}
+            <div className="row mb-4">
+              <div className="col-md-4 mb-3">
+                <div className="card border-primary border-5 h-100">
+                  <div className="card-body text-center">
+                    <h6 className="text-muted mb-2">Total Clicks (Point Views)</h6>
+                    <h2 className="text-primary mb-0">{analyticsAnalytics?.point_views || 0}</h2>
+                  </div>
+                </div>
+              </div>
+              <div className="col-md-4 mb-3">
+                <div className="card border-info border-5 h-100">
+                  <div className="card-body text-center">
+                    <h6 className="text-muted mb-2">Total Searches</h6>
+                    <h2 className="text-info mb-0">{analyticsAnalytics?.searches || 0}</h2>
+                  </div>
+                </div>
+              </div>
+              <div className="col-md-4 mb-3">
+                <div className="card border-success border-5 h-100">
+                  <div className="card-body text-center">
+                    <h6 className="text-muted mb-2">Total Reservations</h6>
+                    <h2 className="text-success mb-0">{analyticsAnalytics?.reservations || 0}</h2>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            {/* Revenue and Invoice Section */}
             <div className="row">
               <div className="col-md-6 mb-3">
                 <div className="card">
                   <div className="card-header bg-light">
-                    <h5 className="mb-0">Revenue Report</h5>
+                    <h5 className="mb-0">Monthly Revenue</h5>
                   </div>
                   <div className="card-body">
                     <div className="mb-3">
-                      <p className="text-muted small">Monthly Revenue</p>
-                      <h3>€5,250.00</h3>
+                      <p className="text-muted small">Total Revenue This Month</p>
+                      <h3>€{(analytics.revenue || 0).toFixed(2)}</h3>
                     </div>
-                    <div className="mb-3">
-                      <p className="text-muted small">Weekly Average</p>
-                      <h4>€1,312.50</h4>
-                    </div>
-                    <button className="btn btn-sm btn-outline-primary">Download Report</button>
+                    <button
+                      className="btn btn-primary"
+                      onClick={handleRequestInvoice}
+                      disabled={invoiceLoading}
+                    >
+                      {invoiceLoading ? 'Generating...' : 'Request Invoice'}
+                    </button>
                   </div>
                 </div>
               </div>
@@ -391,18 +518,217 @@ const ProviderDashboard = ({ setToken }) => {
                   </div>
                   <div className="card-body">
                     <div className="mb-3">
-                      <p className="text-muted small">Total Sessions</p>
-                      <h3>842</h3>
+                      <p className="text-muted small">Total Stations</p>
+                      <h4>{analytics.totalStations || 0}</h4>
                     </div>
                     <div className="mb-3">
-                      <p className="text-muted small">Average Session Duration</p>
-                      <h4>38 minutes</h4>
+                      <p className="text-muted small">Utilization Rate</p>
+                      <h4>{(analytics.utilization || 0).toFixed(1)}%</h4>
                     </div>
-                    <button className="btn btn-sm btn-outline-primary">View Details</button>
                   </div>
                 </div>
               </div>
             </div>
+
+            {/* Invoice Result Modal */}
+            {invoiceResult && (
+              <div className="modal d-block" style={{ backgroundColor: 'rgba(0,0,0,0.5)' }}>
+                <div className="modal-dialog modal-lg">
+                  <div className="modal-content">
+                    <div className="modal-header">
+                      <h5 className="modal-title">Invoice Generated</h5>
+                      <button type="button" className="btn-close" onClick={() => setInvoiceResult(null)}></button>
+                    </div>
+                    <div className="modal-body">
+                      <table className="table table-bordered">
+                        <tbody>
+                          <tr>
+                            <td><strong>Invoice ID:</strong></td>
+                            <td>{invoiceResult.invoice_id}</td>
+                          </tr>
+                          <tr>
+                            <td><strong>Period:</strong></td>
+                            <td>{invoiceResult.billing_period?.start} - {invoiceResult.billing_period?.end}</td>
+                          </tr>
+                          <tr>
+                            <td><strong>Events:</strong></td>
+                            <td>{invoiceResult.event_count}</td>
+                          </tr>
+                          <tr>
+                            <td><strong>Subtotal:</strong></td>
+                            <td>€{invoiceResult.subtotal?.toFixed(2)}</td>
+                          </tr>
+                          <tr>
+                            <td><strong>Tax (24%):</strong></td>
+                            <td>€{invoiceResult.tax_amount?.toFixed(2)}</td>
+                          </tr>
+                          <tr>
+                            <td><strong>Grand Total:</strong></td>
+                            <td><strong>€{invoiceResult.grand_total?.toFixed(2)}</strong></td>
+                          </tr>
+                          <tr>
+                            <td><strong>Status:</strong></td>
+                            <td><span className={`badge bg-${invoiceResult.status === 'paid' ? 'success' : 'warning'}`}>{invoiceResult.status}</span></td>
+                          </tr>
+                        </tbody>
+                      </table>
+                    </div>
+                    <div className="modal-footer">
+                      <button type="button" className="btn btn-secondary" onClick={() => setInvoiceResult(null)}>Close</button>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* Error Alert */}
+            {invoiceError && (
+              <div className="alert alert-danger mt-3">{invoiceError}</div>
+            )}
+          </div>
+        )}
+
+        {/* UC05: View Invoice Tab */}
+        {activeTab === 'invoices' && (
+          <div>
+            <h3 className="mb-4">UC05: View Invoice</h3>
+
+            {invoiceLoading ? (
+              <div className="text-center p-5">
+                <div className="spinner-border" role="status"></div>
+              </div>
+            ) : invoiceData ? (
+              <>
+                {/* Current Invoice */}
+                <div className="card mb-4">
+                  <div className="card-header bg-primary text-white">
+                    <h5 className="mb-0">Current Invoice</h5>
+                  </div>
+                  <div className="card-body">
+                    <div className="row">
+                      <div className="col-md-6">
+                        <table className="table table-borderless">
+                          <tbody>
+                            <tr>
+                              <td><strong>Invoice ID:</strong></td>
+                              <td>{invoiceData.invoice_id}</td>
+                            </tr>
+                            <tr>
+                              <td><strong>Billing Period:</strong></td>
+                              <td>{invoiceData.billing_period?.start} - {invoiceData.billing_period?.end}</td>
+                            </tr>
+                            <tr>
+                              <td><strong>Status:</strong></td>
+                              <td>
+                                <span className={`badge bg-${invoiceData.status === 'paid' ? 'success' : 'warning'}`}>
+                                  {invoiceData.status}
+                                </span>
+                              </td>
+                            </tr>
+                            <tr>
+                              <td><strong>Event Count:</strong></td>
+                              <td>{invoiceData.event_count}</td>
+                            </tr>
+                          </tbody>
+                        </table>
+                      </div>
+                      <div className="col-md-6">
+                        <table className="table table-borderless">
+                          <tbody>
+                            <tr>
+                              <td><strong>Subtotal:</strong></td>
+                              <td>€{invoiceData.subtotal?.toFixed(2)}</td>
+                            </tr>
+                            <tr>
+                              <td><strong>Tax (24%):</strong></td>
+                              <td>€{invoiceData.tax_amount?.toFixed(2)}</td>
+                            </tr>
+                            <tr>
+                              <td><strong>Grand Total:</strong></td>
+                              <td><h4 className="text-success">€{invoiceData.grand_total?.toFixed(2)}</h4></td>
+                            </tr>
+                            <tr>
+                              <td><strong>Due Date:</strong></td>
+                              <td>{invoiceData.due_date}</td>
+                            </tr>
+                          </tbody>
+                        </table>
+                      </div>
+                    </div>
+
+                    {/* Payment Request Button - UC05 */}
+                    {invoiceData.status !== 'paid' && (
+                      <div className="mt-3">
+                        <button
+                          className="btn btn-success btn-lg"
+                          onClick={handleRequestPayment}
+                          disabled={paymentLoading}
+                        >
+                          {paymentLoading ? 'Processing...' : 'Request Payment'}
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                </div>
+
+                {/* Invoice History */}
+                {invoiceHistory.length > 0 && (
+                  <div className="card">
+                    <div className="card-header bg-light">
+                      <h5 className="mb-0">Invoice History</h5>
+                    </div>
+                    <div className="card-body">
+                      <div className="table-responsive">
+                        <table className="table table-hover">
+                          <thead>
+                            <tr>
+                              <th>Invoice ID</th>
+                              <th>Period</th>
+                              <th>Amount</th>
+                              <th>Status</th>
+                              <th>Due Date</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {invoiceHistory.map((inv) => (
+                              <tr key={inv.invoice_id}>
+                                <td>{inv.invoice_id}</td>
+                                <td>{inv.billing_period}</td>
+                                <td>€{parseFloat(inv.grand_total).toFixed(2)}</td>
+                                <td>
+                                  <span className={`badge bg-${inv.status === 'paid' ? 'success' : 'warning'}`}>
+                                    {inv.status}
+                                  </span>
+                                </td>
+                                <td>{inv.due_date}</td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    </div>
+                  </div>
+                )}
+              </>
+            ) : (
+              <div className="alert alert-info">
+                No invoice data available. Click "Load Invoice" to fetch your current invoice.
+              </div>
+            )}
+
+            <div className="mt-3">
+              <button
+                className="btn btn-primary me-2"
+                onClick={fetchInvoiceData}
+                disabled={invoiceLoading}
+              >
+                Load Invoice
+              </button>
+            </div>
+
+            {invoiceError && (
+              <div className="alert alert-danger mt-3">{invoiceError}</div>
+            )}
           </div>
         )}
       </div>

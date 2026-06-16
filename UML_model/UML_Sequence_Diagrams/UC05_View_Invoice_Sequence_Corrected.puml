@@ -1,0 +1,140 @@
+@startuml UC05_View_Invoice_Sequence_Corrected
+title UC05: View Invoice - Sequence Diagram (Corrected)
+
+!theme plain
+skinparam backgroundColor #FEFEFE
+skinparam sequenceArrowFontSize 10
+skinparam sequenceFontSize 10
+skinparam noteBackgroundColor #FFF2CC
+skinparam noteBorderColor #D6B656
+
+actor "Charging Points Provider" as User
+participant "Browser" as Browser
+participant "Frontend" as FE
+participant "API Gateway" as Gateway
+participant "Billing Service" as BillingSvc
+database "Billing DB" as BillingDB
+
+autonumber 1
+
+== Load Invoice Data ==
+
+User -> Browser: Selects "Invoices" Tab
+activate Browser
+User -> Browser: Clicks "Load Invoice"
+
+Browser -> FE: fetchInvoiceData()
+activate FE
+
+'=== Call 1: Get Current Invoice ===
+FE -> Gateway: GET /api/billing/invoice/{providerId}
+activate Gateway
+Gateway -> BillingSvc: Forward Request
+activate BillingSvc
+
+BillingSvc -> BillingDB: SELECT * FROM invoices\nWHERE provider_id = ? AND billing_period_start = ? AND billing_period_end = ?
+activate BillingDB
+BillingDB --> BillingSvc: Invoice Record
+deactivate BillingDB
+
+alt Invoice Exists
+    BillingSvc -> BillingSvc: Use Existing Invoice
+else Invoice Not Found
+    BillingSvc -> BillingDB: SELECT SUM(amount) as total, COUNT(*) as cnt\nFROM billable_events\nWHERE provider_id = ? AND billing_month = ?
+    activate BillingDB
+    BillingDB --> BillingSvc: Event Totals
+    deactivate BillingDB
+
+    BillingSvc -> BillingSvc: Calculate\nsubtotal, tax(21%), grand_total
+
+    BillingSvc -> BillingDB: INSERT INTO invoices\n(provider_id,billing_period_start,billing_period_end,total_amount,tax_amount,grand_total,due_date,event_count,status)
+    activate BillingDB
+    BillingDB --> BillingSvc: New Invoice Record
+    deactivate BillingDB
+
+    BillingSvc -> BillingDB: INSERT INTO invoice_line_items\n(invoice_id,description,quantity,unit_price,line_total)
+    activate BillingDB
+    BillingDB --> BillingSvc: Line Item Created
+    deactivate BillingDB
+end
+
+BillingSvc --> Gateway: 200 OK (Current Invoice JSON)
+deactivate BillingSvc
+
+Gateway --> FE: 200 OK (Invoice + Line Items)
+deactivate Gateway
+
+'=== Call 2: Get Invoice History ===
+FE -> Gateway: GET /api/billing/invoices/{providerId}?limit=12
+activate Gateway
+Gateway -> BillingSvc: Forward Request
+activate BillingSvc
+
+BillingSvc -> BillingDB: SELECT * FROM invoices\nWHERE provider_id = ?\nORDER BY issued_at DESC LIMIT 12
+activate BillingDB
+BillingDB --> BillingSvc: Invoice History Array
+deactivate BillingDB
+
+BillingSvc --> Gateway: 200 OK (History Array)
+deactivate BillingSvc
+
+Gateway --> FE: 200 OK (History)
+deactivate Gateway
+
+FE -> Browser: Render Invoice Table & History
+deactivate FE
+
+== Payment Request (Optional) ==
+
+opt [invoiceData.status != 'paid']
+    Browser -> Browser: Display "Request Payment" Button
+
+    User -> Browser: Clicks "Request Payment"
+
+    Browser -> FE: handleRequestPayment()
+    activate FE
+
+    FE -> Gateway: POST /api/billing/invoices/{providerId}/{invoiceId}/pay\n(body: {paymentMethod: 'bank_transfer'})
+    activate Gateway
+
+    Gateway -> BillingSvc: Process Payment Request
+    activate BillingSvc
+
+    note over BillingSvc, BillingDB
+      **Note:** Since UC07 (Pay Invoice) is excluded from MVP,
+      payment processing is mocked within Billing Service.
+    end note
+
+    BillingSvc -> BillingDB: SELECT * FROM invoices\nWHERE invoice_id = ? AND provider_id = ?
+    activate BillingDB
+    BillingDB --> BillingSvc: Invoice Record
+    deactivate BillingDB
+
+    alt Invoice Already Paid
+        BillingSvc --> Gateway: 400 Error ("Invoice already paid")
+    else Invoice Valid
+        BillingSvc -> BillingDB: UPDATE invoices\nSET status = 'paid', paid_at = NOW()\nWHERE invoice_id = ?
+        activate BillingDB
+        BillingDB --> BillingSvc: ACK
+        deactivate BillingDB
+
+        BillingSvc -> BillingDB: INSERT INTO payment_history\n(invoice_id,provider_id,amount,payment_method,reference,status,paid_at)
+        activate BillingDB
+        BillingDB --> BillingSvc: Payment Record Created
+        deactivate BillingDB
+
+        BillingSvc --> Gateway: 200 OK ({success: true, message: "Payment processed successfully"})
+    end
+    deactivate BillingSvc
+
+    Gateway --> FE: Response
+    deactivate Gateway
+
+    FE -> Browser: Display Success Alert
+    deactivate FE
+
+    FE -> Browser: Refresh Invoice Data
+    deactivate Browser
+end
+
+@enduml
