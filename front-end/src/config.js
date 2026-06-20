@@ -7,14 +7,15 @@
 
 // Service-Specific URLs
 export const SERVICES = {
-  providers: 'http://127.0.0.1:3105/api',      // Provider Management Service (UC03)
-  analytics: 'http://127.0.0.1:3102/api',      // Analytics Service (UC04)
-  billing: 'http://127.0.0.1:3103/api',        // Billing Service (UC05)
-  reservations: 'http://127.0.0.1:3106/api'    // Reservation Service (UC01, unified reserve endpoint)
+  auth: 'http://127.0.0.1:8001/api/auth',           // Auth Service via API Gateway
+  providers: 'http://127.0.0.1:8001/api/providers', // Provider Management via API Gateway
+  analytics: 'http://127.0.0.1:8001/api/analytics', // Analytics via API Gateway
+  billing: 'http://127.0.0.1:8001/api/billing',     // Billing via API Gateway
+  reservations: 'http://127.0.0.1:8001/api/reservations' // Reservation via API Gateway
 };
 
 // Legacy fallback (για backward compatibility)
-export const BASE_URL = "http://127.0.0.1:9876/api";
+export const BASE_URL = "http://127.0.0.1:8001/api"; 
 
 /**
  * Get service URL by service name

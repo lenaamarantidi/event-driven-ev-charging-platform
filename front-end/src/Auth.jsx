@@ -1,6 +1,6 @@
-import { useState } from 'react';
+﻿import { useState } from 'react';
 import axios from 'axios';
-import { getServiceURL } from '../config';
+import { BASE_URL, getServiceURL } from '../config';
 
 const Auth = ({ setToken, setUserRole }) => {
   const [isLogin, setIsLogin] = useState(true);
@@ -28,10 +28,9 @@ const Auth = ({ setToken, setUserRole }) => {
   const getEndpoint = () => {
     if (role === 'provider') {
       const serviceUrl = getServiceURL('providers');
-      return `${serviceUrl}/${isLogin ? 'login' : 'register'}`;
+      return `${serviceUrl}/providers/${isLogin ? 'login' : 'register'}`;
     }
-    const serviceUrl = getServiceURL('auth');
-    return `${serviceUrl}/${isLogin ? 'login' : 'register'}`;
+    return `${BASE_URL}/auth/${isLogin ? 'login' : 'register'}`;
   };
 
   const getPayload = () => {
@@ -73,17 +72,10 @@ const Auth = ({ setToken, setUserRole }) => {
       password: formData.password
     };
   };
+
   const handleSubmit = async (e) => {
     e.preventDefault();
     setError('');
-
-    // Client-side validation for signup flows: show clear error for short passwords
-    if (!isLogin) {
-      if (!formData.password || formData.password.length < 8) {
-        setError('Password must be at least 8 characters');
-        return;
-      }
-    }
 
     try {
       const endpoint = getEndpoint();
@@ -123,14 +115,7 @@ const Auth = ({ setToken, setUserRole }) => {
           message = err.response.data.error || 'This account already exists.';
         }
       } else if (err.response?.data?.error) {
-        // Check for username taken error in the error message text (case-insensitive)
-        if (errorText.includes('username') && (errorText.includes('taken') || errorText.includes('exists'))) {
-          message = 'This username is taken, please choose another one.';
-        } else if (errorText.includes('email') && (errorText.includes('registered') || errorText.includes('exists'))) {
-          message = 'This email is already registered, please use another one.';
-        } else {
-          message = err.response.data.error;
-        }
+        message = err.response.data.error;
       } else if (err.message) {
         message = err.message;
       }

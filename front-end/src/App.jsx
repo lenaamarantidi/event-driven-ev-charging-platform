@@ -14,7 +14,18 @@ function App() {
 
   // If no token, show auth
   if (!token) {
-    return <Auth setToken={(newToken) => { setToken(newToken); localStorage.setItem('token', newToken); }} />;
+    return (
+      <Auth
+        setToken={(newToken) => {
+          setToken(newToken);
+          localStorage.setItem('token', newToken);
+        }}
+        setUserRole={(role) => {
+          setUserRole(role);
+          localStorage.setItem('userRole', role);
+        }}
+      />
+    );
   }
 
   // If token but no role, show role select

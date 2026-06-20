@@ -5,6 +5,31 @@
 
 const { pool } = require('./db');
 const { publishProviderRegistered } = require('./rabbitmq');
+const bcrypt = require('bcryptjs');
+const jwt = require('jsonwebtoken');
+
+const JWT_SECRET = process.env.JWT_SECRET || 'provider_jwt_secret';
+const JWT_EXPIRY = process.env.JWT_EXPIRY || '15m';
+
+function validateProviderEmail(email) {
+  return typeof email === 'string' && /\S+@\S+\.\S+/.test(email);
+}
+
+async function hashPassword(password) {
+  return bcrypt.hash(password, 12);
+}
+
+async function comparePassword(password, hash) {
+  return bcrypt.compare(password, hash);
+}
+
+async function getProviderByName(providerName) {
+  const [rows] = await pool.query(
+    'SELECT * FROM providers WHERE provider_name = ? ORDER BY provider_id ASC LIMIT 1',
+    [providerName.trim()]
+  );
+  return rows[0] || null;
+}
 
 /**
  * Validate provider registration request
@@ -24,6 +49,14 @@ function validateRegistrationRequest(data) {
 
   if (!data.api_key || typeof data.api_key !== 'string' || data.api_key.trim().length === 0) {
     errors.push('api_key is required and must be a non-empty string');
+  }
+
+  if (!data.provider_email || !validateProviderEmail(data.provider_email)) {
+    errors.push('provider_email is required and must be a valid email address');
+  }
+
+  if (!data.password || typeof data.password !== 'string' || data.password.length < 8) {
+    errors.push('password is required and must be at least 8 characters long');
   }
 
   // Validate the 4 required endpoints
@@ -65,6 +98,8 @@ function isValidUrl(string) {
  * Request body:
  * {
  *   "provider_name": "string",
+ *   "provider_email": "string",
+ *   "password": "string",
  *   "base_url": "string",
  *   "api_key": "string",
  *   "endpoint_list_points": "string",
@@ -75,11 +110,23 @@ function isValidUrl(string) {
  */
 async function registerProvider(req, res) {
   try {
-    const { provider_name, base_url, api_key, endpoint_list_points, endpoint_point_details, endpoint_reserve, endpoint_reserve_duration } = req.body;
+    const {
+      provider_name,
+      provider_email,
+      password,
+      base_url,
+      api_key,
+      endpoint_list_points,
+      endpoint_point_details,
+      endpoint_reserve,
+      endpoint_reserve_duration
+    } = req.body;
 
     // Validate input
     const validation = validateRegistrationRequest({
       provider_name,
+      provider_email,
+      password,
       base_url,
       api_key,
       endpoint_list_points,
@@ -96,31 +143,48 @@ async function registerProvider(req, res) {
     }
 
     // Check if provider already exists
-    const [existingProviders] = await pool.query(
+    const [existingProvidersByName] = await pool.query(
       'SELECT provider_id FROM providers WHERE provider_name = ?',
       [provider_name.trim()]
     );
 
-    if (existingProviders.length > 0) {
+    if (existingProvidersByName.length > 0) {
       return res.status(409).json({
         error: 'Provider with this name already exists'
       });
     }
 
+    const [existingProvidersByEmail] = await pool.query(
+      'SELECT provider_id FROM providers WHERE provider_email = ?',
+      [provider_email.toLowerCase().trim()]
+    );
+
+    if (existingProvidersByEmail.length > 0) {
+      return res.status(409).json({
+        error: 'Provider with this email already exists'
+      });
+    }
+
+    const passwordHash = await hashPassword(password);
+
     // Insert provider into database
     const [result] = await pool.query(
       `INSERT INTO providers (
-        provider_name, 
-        base_url, 
-        api_key, 
-        endpoint_list_points, 
-        endpoint_point_details, 
-        endpoint_reserve, 
+        provider_name,
+        provider_email,
+        password_hash,
+        base_url,
+        api_key,
+        endpoint_list_points,
+        endpoint_point_details,
+        endpoint_reserve,
         endpoint_reserve_duration,
         status
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, 'active')`,
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'active')`,
       [
         provider_name.trim(),
+        provider_email.toLowerCase().trim(),
+        passwordHash,
         base_url.trim(),
         api_key.trim(),
         endpoint_list_points.trim(),
@@ -132,7 +196,7 @@ async function registerProvider(req, res) {
 
     // Fetch the created provider
     const [providers] = await pool.query(
-      'SELECT provider_id, provider_name, base_url, api_key, endpoint_list_points, endpoint_point_details, endpoint_reserve, endpoint_reserve_duration, status, registered_at FROM providers WHERE provider_id = ?',
+      'SELECT provider_id, provider_name, provider_email, base_url, api_key, endpoint_list_points, endpoint_point_details, endpoint_reserve, endpoint_reserve_duration, status, registered_at FROM providers WHERE provider_id = ?',
       [result.insertId]
     );
 
@@ -146,6 +210,7 @@ async function registerProvider(req, res) {
       provider: {
         provider_id: newProvider.provider_id,
         provider_name: newProvider.provider_name,
+        provider_email: newProvider.provider_email,
         base_url: newProvider.base_url,
         status: newProvider.status,
         endpoints: {
@@ -169,6 +234,56 @@ async function registerProvider(req, res) {
 
     return res.status(500).json({
       error: 'Failed to register provider',
+      message: err.message
+    });
+  }
+}
+
+/**
+ * POST /api/providers/login
+ * Provider login with provider_name and password.
+ */
+async function loginProvider(req, res) {
+  try {
+    const { provider_name, password } = req.body;
+
+    if (!provider_name || typeof provider_name !== 'string' || provider_name.trim().length === 0) {
+      return res.status(400).json({ error: 'provider_name is required' });
+    }
+
+    if (!password || typeof password !== 'string' || password.length < 8) {
+      return res.status(400).json({ error: 'password is required and must be at least 8 characters' });
+    }
+
+    const provider = await getProviderByName(provider_name);
+    if (!provider || !provider.password_hash) {
+      return res.status(401).json({ error: 'Invalid provider name or password' });
+    }
+
+    const passwordMatches = await comparePassword(password, provider.password_hash);
+    if (!passwordMatches) {
+      return res.status(401).json({ error: 'Invalid provider name or password' });
+    }
+
+    const accessToken = jwt.sign(
+      {
+        sub: provider.provider_id,
+        provider_name: provider.provider_name,
+        provider_email: provider.provider_email
+      },
+      JWT_SECRET,
+      { expiresIn: JWT_EXPIRY }
+    );
+
+    return res.json({
+      providerId: provider.provider_id,
+      providerName: provider.provider_name,
+      accessToken
+    });
+  } catch (err) {
+    console.error('Error in loginProvider:', err.message);
+    return res.status(500).json({
+      error: 'Failed to login provider',
       message: err.message
     });
   }
@@ -330,6 +445,7 @@ async function healthCheck(req, res) {
 
 module.exports = {
   registerProvider,
+  loginProvider,
   getProvider,
   getAllProviders,
   suspendProvider,

@@ -12,6 +12,7 @@ const { initializeDatabase, testConnection } = require('./db');
 const { connectWithRetry, closeConnection } = require('./rabbitmq');
 const {
   registerProvider,
+  loginProvider,
   getProvider,
   getAllProviders,
   suspendProvider,
@@ -23,6 +24,17 @@ const PORT = Number(process.env.PORT || 3105);
 
 // Middleware
 app.use(express.json());
+
+// CORS for frontend development and service communication
+app.use((req, res, next) => {
+  res.header('Access-Control-Allow-Origin', '*');
+  res.header('Access-Control-Allow-Methods', 'GET,POST,PUT,DELETE,OPTIONS');
+  res.header('Access-Control-Allow-Headers', 'Origin, X-Requested-With, Content-Type, Accept, Authorization');
+  if (req.method === 'OPTIONS') {
+    return res.sendStatus(204);
+  }
+  next();
+});
 
 // Request logging middleware
 app.use((req, res, next) => {
@@ -45,6 +57,7 @@ app.get('/', (req, res) => {
     port: PORT,
     endpoints: [
       'POST /api/providers/register',
+      'POST /api/providers/login',
       'GET /api/providers',
       'GET /api/providers/:providerId',
       'POST /api/providers/:providerId/suspend',
@@ -59,6 +72,12 @@ app.get('/', (req, res) => {
  * Register a new EV charging provider with their 4 API endpoints
  */
 app.post('/api/providers/register', registerProvider);
+
+/**
+ * Provider Login
+ * POST /api/providers/login
+ */
+app.post('/api/providers/login', loginProvider);
 
 /**
  * Get all providers
