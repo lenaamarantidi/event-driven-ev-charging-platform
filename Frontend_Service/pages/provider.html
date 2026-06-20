@@ -1,0 +1,165 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Charging Points Provider Dashboard - Charger.io</title>
+  <style>
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+      font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+    }
+    body {
+      background: linear-gradient(135deg, #2d5016 0%, #4a7c59 100%);
+      min-height: 100vh;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      padding: 20px;
+    }
+    .container {
+      background: white;
+      border-radius: 20px;
+      box-shadow: 0 20px 40px rgba(0,0,0,0.3);
+      width: 100%;
+      max-width: 1200px;
+      padding: 50px;
+      text-align: center;
+    }
+    .header {
+      margin-bottom: 40px;
+    }
+    .header h1 {
+      color: #2d5016;
+      font-size: 3rem;
+      margin-bottom: 15px;
+      font-weight: 800;
+    }
+    .header p {
+      color: #666;
+      font-size: 1.2rem;
+    }
+    .title-display {
+      background: linear-gradient(135deg, #2d5016 0%, #4a7c59 100%);
+      color: white;
+      padding: 40px;
+      border-radius: 15px;
+      margin: 30px 0;
+    }
+    .title-display h2 {
+      font-size: 2.5rem;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 2px;
+    }
+    .provider-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+      gap: 20px;
+      margin-top: 40px;
+    }
+    .provider-card {
+      background: linear-gradient(135deg, #2d5016 0%, #4a7c59 100%);
+      color: white;
+      padding: 30px;
+      border-radius: 15px;
+      text-align: center;
+      box-shadow: 0 5px 15px rgba(0,0,0,0.2);
+    }
+    .provider-card h3 {
+      font-size: 2.5rem;
+      margin-bottom: 10px;
+      font-weight: 800;
+    }
+    .provider-card p {
+      opacity: 0.95;
+      font-size: 1rem;
+    }
+    .charging-icon {
+      font-size: 3rem;
+      margin-bottom: 15px;
+    }
+    .stats-display {
+      background: #f8f9fa;
+      padding: 30px;
+      border-radius: 15px;
+      margin-top: 30px;
+      text-align: left;
+    }
+    .stats-row {
+      display: flex;
+      justify-content: space-between;
+      padding: 15px 0;
+      border-bottom: 1px solid #e0e0e0;
+    }
+    .stats-row:last-child {
+      border-bottom: none;
+    }
+    .stats-label {
+      color: #666;
+      font-weight: 600;
+    }
+    .stats-value {
+      color: #2d5016;
+      font-weight: 700;
+      font-size: 1.2rem;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="header">
+      <h1>Provider Dashboard</h1>
+      <p>Charger.io - Charging Infrastructure Management</p>
+    </div>
+    
+    <div class="title-display">
+      <h2>Charging Points Provider Dashboard</h2>
+    </div>
+    
+    <div class="provider-grid">
+      <div class="provider-card">
+        <div class="charging-icon">⚡</div>
+        <h3>56</h3>
+        <p>Total Stations</p>
+      </div>
+      <div class="provider-card">
+        <div class="charging-icon">🔌</div>
+        <h3>247</h3>
+        <p>Total Connectors</p>
+      </div>
+      <div class="provider-card">
+        <div class="charging-icon">💰</div>
+        <h3>$45.2K</h3>
+        <p>Monthly Revenue</p>
+      </div>
+      <div class="provider-card">
+        <div class="charging-icon">⭐</div>
+        <h3>4.9</h3>
+        <p>Avg. Rating</p>
+      </div>
+    </div>
+    
+    <div class="stats-display">
+      <div class="stats-row">
+        <span class="stats-label">Active Sessions:</span>
+        <span class="stats-value">89</span>
+      </div>
+      <div class="stats-row">
+        <span class="stats-label">Energy Delivered (kWh):</span>
+        <span class="stats-value">12,450</span>
+      </div>
+      <div class="stats-row">
+        <span class="stats-label">Station Utilization:</span>
+        <span class="stats-value">72%</span>
+      </div>
+      <div class="stats-row">
+        <span class="stats-label">Customer Satisfaction:</span>
+        <span class="stats-value">94%</span>
+      </div>
+    </div>
+  </div>
+</body>
+</html>

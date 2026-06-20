@@ -1,0 +1,23 @@
+services:
+  frontend-service:
+    image: frontend_service:latest
+    container_name: frontend-service
+    ports:
+      - "${FRONTEND_SERVICE_PORT}:${FRONTEND_SERVICE_PORT}"
+    environment:
+      PORT: ${FRONTEND_SERVICE_PORT}
+      NODE_ENV: production
+    command: node src/index.js
+    volumes:
+      - frontend-service-data:/app/data
+    networks:
+      - saasplug-network
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+
+networks:
+  saasplug-network:
+    driver: bridge
+
+volumes:
+  frontend-service-data:
