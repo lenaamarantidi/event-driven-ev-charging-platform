@@ -5,13 +5,14 @@
  * Κάθε microservice έχει το δικό του URL για απευθείας επικοινωνία
  */
 
-// Service-Specific URLs
+// Service-Specific URLs (matching docker-compose.yml ports)
 export const SERVICES = {
   auth: 'http://127.0.0.1:8001/api/auth',           // Auth Service via API Gateway
   providers: 'http://127.0.0.1:8001/api/providers', // Provider Management via API Gateway
   analytics: 'http://127.0.0.1:8001/api/analytics', // Analytics via API Gateway
   billing: 'http://127.0.0.1:8001/api/billing',     // Billing via API Gateway
-  reservations: 'http://127.0.0.1:8001/api/reservations' // Reservation via API Gateway
+  reservations: 'http://127.0.0.1:8001/api/reservations', // Reservation via API Gateway
+  points: 'http://127.0.0.1:3001/api'        // Points Service (central) - direct
 };
 
 // Legacy fallback (για backward compatibility)

@@ -76,7 +76,6 @@ const Auth = ({ setToken, setUserRole }) => {
   const handleSubmit = async (e) => {
     e.preventDefault();
     setError('');
-
     // Client-side validation for signup flows: show clear error for short passwords
     if (!isLogin) {
       if (!formData.password || formData.password.length < 8) {

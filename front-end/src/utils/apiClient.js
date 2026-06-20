@@ -450,6 +450,33 @@ export const billingAPI = {
 };
 
 /**
+ * Points Service API (via Reservation Service)
+ * Unified endpoint για λήψη όλων των σημείων φόρτισης από όλους τους providers
+ */
+export const pointsAPI = {
+  /**
+   * GET /api/points
+   * Λήψη όλων των σημείων φόρτισης από τους adapters
+   */
+  getAll: async () => {
+    try {
+      const api = createApiInstance(SERVICES.points);
+      const response = await api.get('/points', getAuthHeaders());
+      return {
+        success: true,
+        data: response.data
+      };
+    } catch (error) {
+      return {
+        success: false,
+        error: error.response?.data?.message || error.message,
+        data: { points: [] }
+      };
+    }
+  }
+};
+
+/**
  * Reservation Service API
  * Unified endpoint για κράτηση σημείων φόρτισης
  */
@@ -548,7 +575,8 @@ export const apiClient = {
   providers: providerAPI,
   analytics: analyticsAPI,
   billing: billingAPI,
-  reservations: reservationAPI
+  reservations: reservationAPI,
+  points: pointsAPI
 };
 
 export default apiClient;

@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import axios from 'axios';
 import { BASE_URL, SERVICES } from '../config';
-import { reservationAPI } from '../utils/apiClient';
+import { pointsAPI, reservationAPI } from '../utils/apiClient';
 import ProviderDataMapper from '../utils/providerDataMapper';
 import MapView from '../components/MapView';
 import InfoPanel from '../components/InfoPanel';
@@ -141,49 +141,51 @@ const EVUserMap = ({ setToken }) => {
     }
   };
 
-  // Fetch Data from Reservation Service
+  // Fetch Data from Points API (via Reservation Service)
   useEffect(() => {
     const fetchData = async () => {
       try {
-        // Κάλεσμα στο Reservation_Service για όλες τις κρατήσεις/σημεία
-        const result = await reservationAPI.getAll();
-        
-        if (result.success && Array.isArray(result.data)) {
-          // Κανονικοποίηση responses χρησιμοποιώντας ProviderDataMapper
-          // Το Reservation_Service επιστρέφει ενοποιημένα σημεία ήδη
-          const normalized = result.data.map((point) => ({
-            pointid: String(point.unifiedPointId || point.id || Math.random()),
-            lat: point.coordinates?.latitude || point.lat || 37.9755,
-            lon: point.coordinates?.longitude || point.lon || 23.7348,
-            name: point.name || `${point.providerName} ${point.unifiedPointId}`,
+        // Fetch all charging points from all providers via Points Service /api/points
+        const result = await pointsAPI.getAll();
+
+        if (result.success && result.data) {
+          const points = result.data.points || result.data || [];
+
+          // Normalize provider data to unified format
+          // Points_Service returns: point_id, provider_name, lon, lat, status, kilowatts, kwh_price, address, etc.
+          const normalized = points.map((point) => ({
+            pointid: String(point.unifiedPointId || point.pointId || point.point_id || point.id || Math.random()),
+            lat: point.lat || point.coordinates?.latitude || 37.9755,
+            lon: point.lon || point.coordinates?.longitude || 23.7348,
+            name: point.name || `${point.provider_name || point.providerName || 'Unknown'} Station ${point.point_id || point.pointId}`,
             address: point.address || '',
             connector_types: point.connector_types || ['Type 2'],
-            kwhprice: point.pricePerKwh || 0.45,
-            cap: point.power || 22,
-            distance: calculateDistance(userLocation[0], userLocation[1], 
-                                       point.coordinates?.latitude || 37.9755,
-                                       point.coordinates?.longitude || 23.7348),
-            outlets: point.outlets || [],
-            currentStatus: point.currentStatus,
-            providerName: point.providerName,
+            kwhprice: point.pricePerKwh || point.kwh_price || point.kwhPrice || 0.45,
+            cap: point.power || point.kilowatts || point.cap || 22,
+            distance: calculateDistance(userLocation[0], userLocation[1],
+                                       point.lat || 37.9755,
+                                       point.lon || 23.7348),
+            outlets: point.connectors || point.outlets || [],
+            currentStatus: point.currentStatus || point.status,
+            providerName: point.provider_name || point.providerName,
             reservationEndTime: point.reservationEndTime
           })).map((location) => ({
             ...location,
             charger_type: (location.cap || 0) <= 22 ? 'AC' : 'DC'
           }));
-          
+
           setChargers(normalized);
         } else {
-          console.warn('Δεν ήταν δυνατή η ανάκτηση σημείων:', result.error);
+          console.warn('Failed to fetch charging points:', result.error);
           setChargers([]);
         }
       } catch (err) {
-        console.error('Error fetching from Reservation Service:', err);
+        console.error('Error fetching from Points API:', err);
         setChargers([]);
       }
     };
     fetchData();
-  }, [userLocation, filters]);
+  }, [userLocation]);
 
   // Apply Filters 
   useEffect(() => {
