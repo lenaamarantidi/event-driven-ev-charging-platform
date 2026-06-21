@@ -76,15 +76,13 @@ function validateRegistrationRequest(data) {
     errors.push(`password is required and must be between 8 and ${MAX_PASSWORD_LENGTH} characters long`);
   }
 
-  // Validate the 4 required endpoints
-  const endpoints = [
+  const requiredEndpoints = [
     'endpoint_list_points',
     'endpoint_point_details',
-    'endpoint_reserve',
-    'endpoint_reserve_duration'
+    'endpoint_reserve'
   ];
 
-  endpoints.forEach(endpoint => {
+  requiredEndpoints.forEach(endpoint => {
     if (!data[endpoint] || typeof data[endpoint] !== 'string' || data[endpoint].trim().length === 0) {
       errors.push(`${endpoint} is required and must be a non-empty string`);
     } else if (!isValidEndpointPathOrUrl(data[endpoint])) {
@@ -93,6 +91,16 @@ function validateRegistrationRequest(data) {
       errors.push(`${endpoint} must be at most ${MAX_ENDPOINT_LENGTH} characters long`);
     }
   });
+
+  if (data.endpoint_reserve_duration !== undefined && data.endpoint_reserve_duration !== null && String(data.endpoint_reserve_duration).trim().length > 0) {
+    if (typeof data.endpoint_reserve_duration !== 'string') {
+      errors.push('endpoint_reserve_duration must be a string when provided');
+    } else if (!isValidEndpointPathOrUrl(data.endpoint_reserve_duration)) {
+      errors.push('endpoint_reserve_duration must be a valid absolute URL or an absolute path starting with /');
+    } else if (data.endpoint_reserve_duration.trim().length > MAX_ENDPOINT_LENGTH) {
+      errors.push(`endpoint_reserve_duration must be at most ${MAX_ENDPOINT_LENGTH} characters long`);
+    }
+  }
 
   return {
     isValid: errors.length === 0,
@@ -185,7 +193,10 @@ async function registerProvider(req, res) {
       endpoint_list_points: endpoint_list_points.trim(),
       endpoint_point_details: endpoint_point_details.trim(),
       endpoint_reserve: endpoint_reserve.trim(),
-      endpoint_reserve_duration: endpoint_reserve_duration.trim()
+      endpoint_reserve_duration:
+        typeof endpoint_reserve_duration === 'string' && endpoint_reserve_duration.trim().length > 0
+          ? endpoint_reserve_duration.trim()
+          : null
     };
 
     // Check if provider already exists

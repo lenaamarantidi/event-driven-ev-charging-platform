@@ -285,13 +285,13 @@ const Auth = ({ setToken, setUserRole }) => {
                     />
                   </div>
                   <div className="mb-3">
-                    <label>Reserve with duration Endpoint</label>
+                    <label>Reserve with duration Endpoint (optional)</label>
                     <input
                       type="text"
                       className="form-control"
                       value={formData.endpoint_reserve_duration}
                       onChange={handleFieldChange('endpoint_reserve_duration')}
-                      required
+                      placeholder="Leave blank if not supported"
                     />
                   </div>
                 </>

@@ -19,7 +19,7 @@ CREATE TABLE IF NOT EXISTS providers (
   endpoint_list_points VARCHAR(500) NOT NULL COMMENT 'GET endpoint to list charging points',
   endpoint_point_details VARCHAR(500) NOT NULL COMMENT 'GET endpoint to get point details',
   endpoint_reserve VARCHAR(500) NOT NULL COMMENT 'POST endpoint to make reservation',
-  endpoint_reserve_duration VARCHAR(500) NOT NULL COMMENT 'POST endpoint to make reservation with duration',
+  endpoint_reserve_duration VARCHAR(500) NULL COMMENT 'POST endpoint to make reservation with duration',
   status VARCHAR(50) DEFAULT 'active' COMMENT 'active, suspended, inactive',
   registered_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
   updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,

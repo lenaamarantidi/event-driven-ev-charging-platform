@@ -39,7 +39,7 @@ async function initializeDatabase() {
         endpoint_list_points VARCHAR(500) NOT NULL COMMENT 'GET endpoint to list charging points',
         endpoint_point_details VARCHAR(500) NOT NULL COMMENT 'GET endpoint to get point details',
         endpoint_reserve VARCHAR(500) NOT NULL COMMENT 'POST endpoint to make reservation',
-        endpoint_reserve_duration VARCHAR(500) NOT NULL COMMENT 'POST endpoint to make reservation with duration',
+        endpoint_reserve_duration VARCHAR(500) NULL COMMENT 'POST endpoint to make reservation with duration',
         status VARCHAR(50) DEFAULT 'active' COMMENT 'active, suspended, inactive',
         registered_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
         updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
@@ -76,6 +76,12 @@ async function initializeDatabase() {
 
     if (!(await columnExists('providers', 'password_hash'))) {
       await connection.query('ALTER TABLE providers ADD COLUMN password_hash VARCHAR(255) NULL AFTER company_tin');
+    }
+
+    if (!(await columnExists('providers', 'endpoint_reserve_duration'))) {
+      await connection.query('ALTER TABLE providers ADD COLUMN endpoint_reserve_duration VARCHAR(500) NULL AFTER endpoint_reserve');
+    } else {
+      await connection.query('ALTER TABLE providers MODIFY endpoint_reserve_duration VARCHAR(500) NULL');
     }
 
     if (!(await indexExists('providers', 'uq_provider_email'))) {

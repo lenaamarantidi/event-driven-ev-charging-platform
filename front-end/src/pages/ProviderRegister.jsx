@@ -230,7 +230,7 @@ const ProviderRegister = ({ onRegistered }) => {
 
                   <div className="col-md-6 mb-3">
                     <label className="form-label">
-                      Reserve Duration Endpoint <span className="text-danger">*</span>
+                      Reserve Duration Endpoint <span className="text-muted">(optional)</span>
                     </label>
                     <input
                       type="text"
@@ -238,8 +238,7 @@ const ProviderRegister = ({ onRegistered }) => {
                       name="endpoint_reserve_duration"
                       value={formData.endpoint_reserve_duration}
                       onChange={handleChange}
-                      placeholder="/api/reserve/{id}/duration"
-                      required
+                      placeholder="Leave blank if not supported"
                     />
                   </div>
                 </div>
