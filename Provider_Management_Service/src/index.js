@@ -9,7 +9,6 @@
 
 const express = require('express');
 const { initializeDatabase, testConnection } = require('./db');
-const { connectWithRetry, closeConnection } = require('./rabbitmq');
 const {
   registerProvider,
   loginProvider,
@@ -148,16 +147,10 @@ async function startServer() {
     }
     console.log('Database connection successful');
 
-    // Connect to RabbitMQ
-    console.log('Connecting to RabbitMQ...');
-    await connectWithRetry(5, 2000);
-    console.log('RabbitMQ connection successful');
-
     // Start Express server
     app.listen(PORT, () => {
       console.log(`✓ Provider Management Service listening on port ${PORT}`);
       console.log(`✓ Database: ${process.env.DB_NAME || 'provider_mgmt_db'}`);
-      console.log(`✓ RabbitMQ: ${process.env.RABBITMQ_URL || 'amqp://localhost'}`);
     });
   } catch (err) {
     console.error('Failed to start server:', err.message);
@@ -172,7 +165,6 @@ async function startServer() {
 async function gracefulShutdown(signal) {
   console.log(`\nReceived ${signal}, shutting down gracefully...`);
   try {
-    await closeConnection();
     process.exit(0);
   } catch (err) {
     console.error('Error during shutdown:', err.message);

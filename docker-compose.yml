@@ -382,11 +382,8 @@ services:
       DB_USER: provider_user
       DB_PASSWORD: provider_pass
       DB_NAME: provider_db
-      RABBITMQ_URL: amqp://guest:guest@rabbitmq:5672
     depends_on:
       mariadb-provider:
-        condition: service_healthy
-      rabbitmq:
         condition: service_healthy
     networks:
       - saasplug-network

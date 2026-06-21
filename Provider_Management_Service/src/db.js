@@ -34,6 +34,8 @@ async function initializeDatabase() {
         provider_email VARCHAR(255) NULL,
         company_tin VARCHAR(32) NULL,
         password_hash VARCHAR(255) NULL,
+        adapter_name VARCHAR(100) NULL COMMENT 'Assigned adapter service name',
+        integration_status VARCHAR(50) NOT NULL DEFAULT 'integration_pending' COMMENT 'integrated, integration_pending',
         base_url VARCHAR(500) NOT NULL,
         api_key VARCHAR(255) NOT NULL,
         endpoint_list_points VARCHAR(500) NOT NULL COMMENT 'GET endpoint to list charging points',
@@ -78,6 +80,14 @@ async function initializeDatabase() {
       await connection.query('ALTER TABLE providers ADD COLUMN password_hash VARCHAR(255) NULL AFTER company_tin');
     }
 
+    if (!(await columnExists('providers', 'adapter_name'))) {
+      await connection.query("ALTER TABLE providers ADD COLUMN adapter_name VARCHAR(100) NULL COMMENT 'Assigned adapter service name' AFTER password_hash");
+    }
+
+    if (!(await columnExists('providers', 'integration_status'))) {
+      await connection.query("ALTER TABLE providers ADD COLUMN integration_status VARCHAR(50) NOT NULL DEFAULT 'integration_pending' COMMENT 'integrated, integration_pending' AFTER adapter_name");
+    }
+
     if (!(await columnExists('providers', 'endpoint_reserve_duration'))) {
       await connection.query('ALTER TABLE providers ADD COLUMN endpoint_reserve_duration VARCHAR(500) NULL AFTER endpoint_reserve');
     } else {
@@ -91,6 +101,22 @@ async function initializeDatabase() {
     if (!(await indexExists('providers', 'uq_company_tin'))) {
       await connection.query('ALTER TABLE providers ADD UNIQUE KEY uq_company_tin (company_tin)');
     }
+
+    await connection.query(`
+      UPDATE providers
+      SET
+        adapter_name = CASE
+          WHEN LOWER(provider_name) = 'redplug' THEN 'provider-adapter-redplug'
+          WHEN LOWER(provider_name) = 'greenplug' THEN 'provider-adapter-greenplug'
+          WHEN LOWER(provider_name) = 'blueplug' THEN 'provider-adapter-blueplug'
+          ELSE adapter_name
+        END,
+        integration_status = CASE
+          WHEN LOWER(provider_name) IN ('redplug', 'greenplug', 'blueplug') THEN 'integrated'
+          ELSE 'integration_pending'
+        END
+      WHERE adapter_name IS NULL OR integration_status IS NULL OR integration_status = ''
+    `);
 
     connection.release();
     console.log('Database schema initialized successfully');

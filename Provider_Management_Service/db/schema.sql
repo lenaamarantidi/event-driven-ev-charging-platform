@@ -13,6 +13,8 @@ CREATE TABLE IF NOT EXISTS providers (
   provider_email VARCHAR(255) NULL,
   company_tin VARCHAR(32) NULL,
   password_hash VARCHAR(255) NULL,
+  adapter_name VARCHAR(100) NULL COMMENT 'Assigned adapter service name',
+  integration_status VARCHAR(50) NOT NULL DEFAULT 'integration_pending' COMMENT 'integrated, integration_pending',
   base_url VARCHAR(500) NOT NULL,
   api_key VARCHAR(255) NOT NULL,
   endpoint_list_points VARCHAR(500) NOT NULL COMMENT 'GET endpoint to list charging points',

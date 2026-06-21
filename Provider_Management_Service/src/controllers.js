@@ -4,7 +4,6 @@
  */
 
 const { pool } = require('./db');
-const { publishProviderRegistered } = require('./rabbitmq');
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
 
@@ -129,6 +128,21 @@ function isValidEndpointPathOrUrl(value) {
   return isValidHttpUrl(trimmed);
 }
 
+function resolveAdapterAssignment(providerName) {
+  const normalized = String(providerName || '').trim().toLowerCase();
+  if (normalized === 'redplug') {
+    return { adapter_name: 'provider-adapter-redplug', integration_status: 'integrated' };
+  }
+  if (normalized === 'greenplug') {
+    return { adapter_name: 'provider-adapter-greenplug', integration_status: 'integrated' };
+  }
+  if (normalized === 'blueplug') {
+    return { adapter_name: 'provider-adapter-blueplug', integration_status: 'integrated' };
+  }
+
+  return { adapter_name: null, integration_status: 'integration_pending' };
+}
+
 /**
  * POST /api/providers/register
  * Register a new EV charging provider
@@ -234,6 +248,7 @@ async function registerProvider(req, res) {
     }
 
     const passwordHash = await hashPassword(normalizedProvider.password);
+    const adapterAssignment = resolveAdapterAssignment(normalizedProvider.provider_name);
 
     // Insert provider into database
     const [result] = await pool.query(
@@ -242,6 +257,8 @@ async function registerProvider(req, res) {
         provider_email,
         company_tin,
         password_hash,
+        adapter_name,
+        integration_status,
         base_url,
         api_key,
         endpoint_list_points,
@@ -255,6 +272,8 @@ async function registerProvider(req, res) {
         normalizedProvider.provider_email,
         normalizedProvider.company_tin,
         passwordHash,
+        adapterAssignment.adapter_name,
+        adapterAssignment.integration_status,
         normalizedProvider.base_url,
         normalizedProvider.api_key,
         normalizedProvider.endpoint_list_points,
@@ -266,14 +285,11 @@ async function registerProvider(req, res) {
 
     // Fetch the created provider
     const [providers] = await pool.query(
-      'SELECT provider_id, provider_name, provider_email, company_tin, base_url, api_key, endpoint_list_points, endpoint_point_details, endpoint_reserve, endpoint_reserve_duration, status, registered_at FROM providers WHERE provider_id = ?',
+      'SELECT provider_id, provider_name, provider_email, company_tin, adapter_name, integration_status, base_url, api_key, endpoint_list_points, endpoint_point_details, endpoint_reserve, endpoint_reserve_duration, status, registered_at FROM providers WHERE provider_id = ?',
       [result.insertId]
     );
 
     const newProvider = providers[0];
-
-    // Publish provider.registered event to RabbitMQ
-    await publishProviderRegistered(newProvider);
 
     return res.status(201).json({
       message: 'Provider registered successfully',
@@ -282,6 +298,8 @@ async function registerProvider(req, res) {
         provider_name: newProvider.provider_name,
         provider_email: newProvider.provider_email,
         company_tin: newProvider.company_tin,
+        adapter_name: newProvider.adapter_name,
+        integration_status: newProvider.integration_status,
         base_url: newProvider.base_url,
         status: newProvider.status,
         endpoints: {
@@ -387,7 +405,7 @@ async function getProvider(req, res) {
     }
 
     const [providers] = await pool.query(
-      'SELECT provider_id, provider_name, provider_email, company_tin, base_url, status, endpoint_list_points, endpoint_point_details, endpoint_reserve, endpoint_reserve_duration, registered_at FROM providers WHERE provider_id = ?',
+      'SELECT provider_id, provider_name, provider_email, company_tin, adapter_name, integration_status, base_url, status, endpoint_list_points, endpoint_point_details, endpoint_reserve, endpoint_reserve_duration, registered_at FROM providers WHERE provider_id = ?',
       [parseInt(providerId, 10)]
     );
 
@@ -405,6 +423,8 @@ async function getProvider(req, res) {
         provider_name: provider.provider_name,
         provider_email: provider.provider_email,
         company_tin: provider.company_tin,
+        adapter_name: provider.adapter_name,
+        integration_status: provider.integration_status,
         base_url: provider.base_url,
         status: provider.status,
         endpoints: {
@@ -433,7 +453,7 @@ async function getAllProviders(req, res) {
   try {
     const { status = 'active', limit = 100, offset = 0 } = req.query;
 
-    let query = 'SELECT provider_id, provider_name, base_url, status, registered_at FROM providers WHERE 1=1';
+    let query = 'SELECT provider_id, provider_name, adapter_name, integration_status, base_url, status, registered_at FROM providers WHERE 1=1';
     const values = [];
 
     if (status) {
@@ -451,6 +471,8 @@ async function getAllProviders(req, res) {
       providers: providers.map(p => ({
         provider_id: p.provider_id,
         provider_name: p.provider_name,
+        adapter_name: p.adapter_name,
+        integration_status: p.integration_status,
         base_url: p.base_url,
         status: p.status,
         registered_at: p.registered_at
