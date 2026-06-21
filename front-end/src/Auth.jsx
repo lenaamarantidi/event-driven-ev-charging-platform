@@ -28,7 +28,7 @@ const Auth = ({ setToken, setUserRole }) => {
   const getEndpoint = () => {
     if (role === 'provider') {
       const serviceUrl = getServiceURL('providers');
-      return `${serviceUrl}/providers/${isLogin ? 'login' : 'register'}`;
+      return `${serviceUrl}/${isLogin ? 'login' : 'register'}`;
     }
     return `${BASE_URL}/auth/${isLogin ? 'login' : 'register'}`;
   };
@@ -91,6 +91,9 @@ const Auth = ({ setToken, setUserRole }) => {
         localStorage.setItem('token', token);
         if (role === 'provider') {
           localStorage.setItem('providerName', formData.provider_name.trim());
+          if (res.data.providerId) {
+            localStorage.setItem('providerId', String(res.data.providerId));
+          }
         } else {
           localStorage.setItem('username', formData.identifier.trim() || formData.username.trim());
         }

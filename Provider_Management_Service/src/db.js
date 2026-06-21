@@ -32,6 +32,7 @@ async function initializeDatabase() {
         provider_id INT(10) UNSIGNED PRIMARY KEY AUTO_INCREMENT,
         provider_name VARCHAR(255) NOT NULL UNIQUE,
         provider_email VARCHAR(255) NULL,
+        company_tin VARCHAR(32) NULL,
         password_hash VARCHAR(255) NULL,
         base_url VARCHAR(500) NOT NULL,
         api_key VARCHAR(255) NOT NULL,
@@ -45,7 +46,8 @@ async function initializeDatabase() {
         INDEX idx_provider_name (provider_name),
         INDEX idx_provider_status (status),
         INDEX idx_registered_at (registered_at),
-        UNIQUE KEY uq_provider_email (provider_email)
+        UNIQUE KEY uq_provider_email (provider_email),
+        UNIQUE KEY uq_company_tin (company_tin)
       ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
     `);
 
@@ -64,16 +66,24 @@ async function initializeDatabase() {
       ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
     `);
 
-    if (!(await indexExists('providers', 'uq_provider_email'))) {
-      await connection.query('ALTER TABLE providers ADD UNIQUE KEY uq_provider_email (provider_email)');
-    }
-
     if (!(await columnExists('providers', 'provider_email'))) {
       await connection.query('ALTER TABLE providers ADD COLUMN provider_email VARCHAR(255) NULL AFTER provider_name');
     }
 
+    if (!(await columnExists('providers', 'company_tin'))) {
+      await connection.query('ALTER TABLE providers ADD COLUMN company_tin VARCHAR(32) NULL AFTER provider_email');
+    }
+
     if (!(await columnExists('providers', 'password_hash'))) {
-      await connection.query('ALTER TABLE providers ADD COLUMN password_hash VARCHAR(255) NULL AFTER provider_email');
+      await connection.query('ALTER TABLE providers ADD COLUMN password_hash VARCHAR(255) NULL AFTER company_tin');
+    }
+
+    if (!(await indexExists('providers', 'uq_provider_email'))) {
+      await connection.query('ALTER TABLE providers ADD UNIQUE KEY uq_provider_email (provider_email)');
+    }
+
+    if (!(await indexExists('providers', 'uq_company_tin'))) {
+      await connection.query('ALTER TABLE providers ADD UNIQUE KEY uq_company_tin (company_tin)');
     }
 
     connection.release();

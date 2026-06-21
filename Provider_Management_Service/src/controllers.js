@@ -10,9 +10,18 @@ const jwt = require('jsonwebtoken');
 
 const JWT_SECRET = process.env.JWT_SECRET || 'provider_jwt_secret';
 const JWT_EXPIRY = process.env.JWT_EXPIRY || '15m';
+const COMPANY_TIN_REGEX = /^\d{9}$/;
+const MAX_PROVIDER_NAME_LENGTH = 255;
+const MAX_API_KEY_LENGTH = 255;
+const MAX_ENDPOINT_LENGTH = 500;
+const MAX_PASSWORD_LENGTH = 128;
 
 function validateProviderEmail(email) {
   return typeof email === 'string' && /\S+@\S+\.\S+/.test(email);
+}
+
+function validateCompanyTin(companyTin) {
+  return typeof companyTin === 'string' && COMPANY_TIN_REGEX.test(companyTin.trim());
 }
 
 async function hashPassword(password) {
@@ -39,24 +48,32 @@ function validateRegistrationRequest(data) {
 
   if (!data.provider_name || typeof data.provider_name !== 'string' || data.provider_name.trim().length === 0) {
     errors.push('provider_name is required and must be a non-empty string');
+  } else if (data.provider_name.trim().length > MAX_PROVIDER_NAME_LENGTH) {
+    errors.push(`provider_name must be at most ${MAX_PROVIDER_NAME_LENGTH} characters long`);
+  }
+
+  if (!data.company_tin || !validateCompanyTin(data.company_tin)) {
+    errors.push('company_tin is required and must be exactly 9 digits');
   }
 
   if (!data.base_url || typeof data.base_url !== 'string' || data.base_url.trim().length === 0) {
     errors.push('base_url is required and must be a non-empty string');
-  } else if (!isValidUrl(data.base_url)) {
-    errors.push('base_url must be a valid URL');
+  } else if (!isValidHttpUrl(data.base_url)) {
+    errors.push('base_url must be a valid http/https URL');
   }
 
   if (!data.api_key || typeof data.api_key !== 'string' || data.api_key.trim().length === 0) {
     errors.push('api_key is required and must be a non-empty string');
+  } else if (data.api_key.trim().length > MAX_API_KEY_LENGTH) {
+    errors.push(`api_key must be at most ${MAX_API_KEY_LENGTH} characters long`);
   }
 
   if (!data.provider_email || !validateProviderEmail(data.provider_email)) {
     errors.push('provider_email is required and must be a valid email address');
   }
 
-  if (!data.password || typeof data.password !== 'string' || data.password.length < 8) {
-    errors.push('password is required and must be at least 8 characters long');
+  if (!data.password || typeof data.password !== 'string' || data.password.length < 8 || data.password.length > MAX_PASSWORD_LENGTH) {
+    errors.push(`password is required and must be between 8 and ${MAX_PASSWORD_LENGTH} characters long`);
   }
 
   // Validate the 4 required endpoints
@@ -70,6 +87,10 @@ function validateRegistrationRequest(data) {
   endpoints.forEach(endpoint => {
     if (!data[endpoint] || typeof data[endpoint] !== 'string' || data[endpoint].trim().length === 0) {
       errors.push(`${endpoint} is required and must be a non-empty string`);
+    } else if (!isValidEndpointPathOrUrl(data[endpoint])) {
+      errors.push(`${endpoint} must be a valid absolute URL or an absolute path starting with /`);
+    } else if (data[endpoint].trim().length > MAX_ENDPOINT_LENGTH) {
+      errors.push(`${endpoint} must be at most ${MAX_ENDPOINT_LENGTH} characters long`);
     }
   });
 
@@ -82,13 +103,22 @@ function validateRegistrationRequest(data) {
 /**
  * Basic URL validation
  */
-function isValidUrl(string) {
+function isValidHttpUrl(string) {
   try {
-    new URL(string);
-    return true;
+    const url = new URL(string);
+    return url.protocol === 'http:' || url.protocol === 'https:';
   } catch (_) {
     return false;
   }
+}
+
+function isValidEndpointPathOrUrl(value) {
+  const trimmed = value.trim();
+  if (trimmed.startsWith('/')) {
+    return !/\s/.test(trimmed);
+  }
+
+  return isValidHttpUrl(trimmed);
 }
 
 /**
@@ -99,6 +129,7 @@ function isValidUrl(string) {
  * {
  *   "provider_name": "string",
  *   "provider_email": "string",
+ *   "company_tin": "string",
  *   "password": "string",
  *   "base_url": "string",
  *   "api_key": "string",
@@ -113,6 +144,7 @@ async function registerProvider(req, res) {
     const {
       provider_name,
       provider_email,
+      company_tin,
       password,
       base_url,
       api_key,
@@ -126,6 +158,7 @@ async function registerProvider(req, res) {
     const validation = validateRegistrationRequest({
       provider_name,
       provider_email,
+      company_tin,
       password,
       base_url,
       api_key,
@@ -142,10 +175,23 @@ async function registerProvider(req, res) {
       });
     }
 
+    const normalizedProvider = {
+      provider_name: provider_name.trim(),
+      provider_email: provider_email.toLowerCase().trim(),
+      company_tin: company_tin.trim(),
+      password,
+      base_url: base_url.trim(),
+      api_key: api_key.trim(),
+      endpoint_list_points: endpoint_list_points.trim(),
+      endpoint_point_details: endpoint_point_details.trim(),
+      endpoint_reserve: endpoint_reserve.trim(),
+      endpoint_reserve_duration: endpoint_reserve_duration.trim()
+    };
+
     // Check if provider already exists
     const [existingProvidersByName] = await pool.query(
       'SELECT provider_id FROM providers WHERE provider_name = ?',
-      [provider_name.trim()]
+      [normalizedProvider.provider_name]
     );
 
     if (existingProvidersByName.length > 0) {
@@ -156,7 +202,7 @@ async function registerProvider(req, res) {
 
     const [existingProvidersByEmail] = await pool.query(
       'SELECT provider_id FROM providers WHERE provider_email = ?',
-      [provider_email.toLowerCase().trim()]
+      [normalizedProvider.provider_email]
     );
 
     if (existingProvidersByEmail.length > 0) {
@@ -165,13 +211,25 @@ async function registerProvider(req, res) {
       });
     }
 
-    const passwordHash = await hashPassword(password);
+    const [existingProvidersByTin] = await pool.query(
+      'SELECT provider_id FROM providers WHERE company_tin = ?',
+      [normalizedProvider.company_tin]
+    );
+
+    if (existingProvidersByTin.length > 0) {
+      return res.status(409).json({
+        error: 'Provider with this company_tin already exists'
+      });
+    }
+
+    const passwordHash = await hashPassword(normalizedProvider.password);
 
     // Insert provider into database
     const [result] = await pool.query(
       `INSERT INTO providers (
         provider_name,
         provider_email,
+        company_tin,
         password_hash,
         base_url,
         api_key,
@@ -180,23 +238,24 @@ async function registerProvider(req, res) {
         endpoint_reserve,
         endpoint_reserve_duration,
         status
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'active')`,
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'active')`,
       [
-        provider_name.trim(),
-        provider_email.toLowerCase().trim(),
+        normalizedProvider.provider_name,
+        normalizedProvider.provider_email,
+        normalizedProvider.company_tin,
         passwordHash,
-        base_url.trim(),
-        api_key.trim(),
-        endpoint_list_points.trim(),
-        endpoint_point_details.trim(),
-        endpoint_reserve.trim(),
-        endpoint_reserve_duration.trim()
+        normalizedProvider.base_url,
+        normalizedProvider.api_key,
+        normalizedProvider.endpoint_list_points,
+        normalizedProvider.endpoint_point_details,
+        normalizedProvider.endpoint_reserve,
+        normalizedProvider.endpoint_reserve_duration
       ]
     );
 
     // Fetch the created provider
     const [providers] = await pool.query(
-      'SELECT provider_id, provider_name, provider_email, base_url, api_key, endpoint_list_points, endpoint_point_details, endpoint_reserve, endpoint_reserve_duration, status, registered_at FROM providers WHERE provider_id = ?',
+      'SELECT provider_id, provider_name, provider_email, company_tin, base_url, api_key, endpoint_list_points, endpoint_point_details, endpoint_reserve, endpoint_reserve_duration, status, registered_at FROM providers WHERE provider_id = ?',
       [result.insertId]
     );
 
@@ -211,6 +270,7 @@ async function registerProvider(req, res) {
         provider_id: newProvider.provider_id,
         provider_name: newProvider.provider_name,
         provider_email: newProvider.provider_email,
+        company_tin: newProvider.company_tin,
         base_url: newProvider.base_url,
         status: newProvider.status,
         endpoints: {
@@ -227,6 +287,18 @@ async function registerProvider(req, res) {
     
     // Handle duplicate key error
     if (err.code === 'ER_DUP_ENTRY') {
+      if (typeof err.sqlMessage === 'string' && err.sqlMessage.includes('uq_provider_email')) {
+        return res.status(409).json({
+          error: 'Provider with this email already exists'
+        });
+      }
+
+      if (typeof err.sqlMessage === 'string' && err.sqlMessage.includes('uq_company_tin')) {
+        return res.status(409).json({
+          error: 'Provider with this company_tin already exists'
+        });
+      }
+
       return res.status(409).json({
         error: 'Provider with this name already exists'
       });
@@ -304,7 +376,7 @@ async function getProvider(req, res) {
     }
 
     const [providers] = await pool.query(
-      'SELECT provider_id, provider_name, base_url, status, endpoint_list_points, endpoint_point_details, endpoint_reserve, endpoint_reserve_duration, registered_at FROM providers WHERE provider_id = ?',
+      'SELECT provider_id, provider_name, provider_email, company_tin, base_url, status, endpoint_list_points, endpoint_point_details, endpoint_reserve, endpoint_reserve_duration, registered_at FROM providers WHERE provider_id = ?',
       [parseInt(providerId, 10)]
     );
 
@@ -320,6 +392,8 @@ async function getProvider(req, res) {
       provider: {
         provider_id: provider.provider_id,
         provider_name: provider.provider_name,
+        provider_email: provider.provider_email,
+        company_tin: provider.company_tin,
         base_url: provider.base_url,
         status: provider.status,
         endpoints: {

@@ -11,6 +11,9 @@ DROP TABLE IF EXISTS providers;
 CREATE TABLE IF NOT EXISTS providers (
   provider_id INT(10) UNSIGNED PRIMARY KEY AUTO_INCREMENT,
   provider_name VARCHAR(255) NOT NULL UNIQUE,
+  provider_email VARCHAR(255) NULL,
+  company_tin VARCHAR(32) NULL,
+  password_hash VARCHAR(255) NULL,
   base_url VARCHAR(500) NOT NULL,
   api_key VARCHAR(255) NOT NULL,
   endpoint_list_points VARCHAR(500) NOT NULL COMMENT 'GET endpoint to list charging points',
@@ -22,7 +25,9 @@ CREATE TABLE IF NOT EXISTS providers (
   updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   INDEX idx_provider_name (provider_name),
   INDEX idx_provider_status (status),
-  INDEX idx_registered_at (registered_at)
+  INDEX idx_registered_at (registered_at),
+  UNIQUE KEY uq_provider_email (provider_email),
+  UNIQUE KEY uq_company_tin (company_tin)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 CREATE TABLE IF NOT EXISTS provider_webhooks (

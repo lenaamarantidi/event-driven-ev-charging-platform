@@ -12,6 +12,7 @@ const Auth = ({ setToken, setUserRole }) => {
     password: '',
     provider_name: '',
     provider_email: '',
+    company_tin: '',
     base_url: '',
     api_key: '',
     endpoint_list_points: '',
@@ -46,6 +47,7 @@ const Auth = ({ setToken, setUserRole }) => {
       return {
         provider_name: formData.provider_name.trim(),
         provider_email: formData.provider_email.trim(),
+        company_tin: formData.company_tin.trim(),
         password: formData.password,
         base_url: formData.base_url.trim(),
         api_key: formData.api_key.trim(),
@@ -94,6 +96,9 @@ const Auth = ({ setToken, setUserRole }) => {
         localStorage.setItem('token', token);
         if (role === 'provider') {
           localStorage.setItem('providerName', formData.provider_name.trim());
+          if (res.data.providerId) {
+            localStorage.setItem('providerId', String(res.data.providerId));
+          }
         } else {
           localStorage.setItem('username', formData.username.trim() || formData.login_email.trim());
         }
@@ -105,6 +110,7 @@ const Auth = ({ setToken, setUserRole }) => {
       }
     } catch (err) {
       let message = 'Authentication failed. Check credentials or server.';
+      const errorDetails = err.response?.data?.details;
       
       // Handle specific error messages from backend
       const errorText = (err.response?.data?.error || '').toLowerCase();
@@ -123,6 +129,8 @@ const Auth = ({ setToken, setUserRole }) => {
           message = 'This username is taken, please choose another one.';
         } else if (errorText.includes('email') && (errorText.includes('registered') || errorText.includes('exists'))) {
           message = 'This email is already registered, please use another one.';
+        } else if (Array.isArray(errorDetails) && errorDetails.length > 0) {
+          message = errorDetails.join(' | ');
         } else {
           message = err.response.data.error;
         }
@@ -146,6 +154,7 @@ const Auth = ({ setToken, setUserRole }) => {
       password: '',
       provider_name: '',
       provider_email: '',
+      company_tin: '',
       base_url: '',
       api_key: '',
       endpoint_list_points: '',
@@ -158,7 +167,7 @@ const Auth = ({ setToken, setUserRole }) => {
 
   return (
     <div className="container d-flex justify-content-center align-items-center vh-100">
-      <div className="card p-4 shadow" style={{ width: '500px' }}>
+      <div className="card p-4 shadow" style={{ width: '500px', maxHeight: '90vh' }}>
         <h2 className="text-center">⚡ charger.io Access</h2>
         {error && <div className="alert alert-danger">{error}</div>}
 
@@ -187,11 +196,14 @@ const Auth = ({ setToken, setUserRole }) => {
           </select>
         </div>
 
-        <form onSubmit={handleSubmit}>
+        <form
+          onSubmit={handleSubmit}
+          style={role === 'provider' && !isLogin ? { maxHeight: '60vh', overflowY: 'auto', paddingRight: '8px' } : undefined}
+        >
           {role === 'provider' ? (
             <>
               <div className="mb-3">
-                <label>{isLogin ? 'Provider Name' : 'Provider Name'}</label>
+                <label>Company Name</label>
                 <input
                   type="text"
                   className="form-control"
@@ -203,12 +215,22 @@ const Auth = ({ setToken, setUserRole }) => {
               {!isLogin && (
                 <>
                   <div className="mb-3">
-                    <label>Provider Email</label>
+                    <label>Company Email</label>
                     <input
                       type="email"
                       className="form-control"
                       value={formData.provider_email}
                       onChange={handleFieldChange('provider_email')}
+                      required
+                    />
+                  </div>
+                  <div className="mb-3">
+                    <label>Company TIN</label>
+                    <input
+                      type="text"
+                      className="form-control"
+                      value={formData.company_tin}
+                      onChange={handleFieldChange('company_tin')}
                       required
                     />
                   </div>
@@ -263,7 +285,7 @@ const Auth = ({ setToken, setUserRole }) => {
                     />
                   </div>
                   <div className="mb-3">
-                    <label>Reserve Duration Endpoint</label>
+                    <label>Reserve with duration Endpoint</label>
                     <input
                       type="text"
                       className="form-control"
