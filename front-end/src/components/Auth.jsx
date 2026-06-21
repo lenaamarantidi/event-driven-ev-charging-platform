@@ -6,7 +6,7 @@ const Auth = ({ setToken, setUserRole }) => {
   const [isLogin, setIsLogin] = useState(true);
   const [role, setRole] = useState('ev_user');
   const [formData, setFormData] = useState({
-    identifier: '',
+    login_email: '',
     username: '',
     email: '',
     password: '',
@@ -57,14 +57,10 @@ const Auth = ({ setToken, setUserRole }) => {
     }
 
     if (isLogin) {
-      const identifier = formData.identifier.trim();
-      const payload = { password: formData.password };
-      if (identifier.includes('@')) {
-        payload.email = identifier;
-      } else {
-        payload.username = identifier;
-      }
-      return payload;
+      return {
+        email: formData.login_email.trim(),
+        password: formData.password
+      };
     }
 
     return {
@@ -85,9 +81,9 @@ const Auth = ({ setToken, setUserRole }) => {
     }
 
     try {
-      const endpoint = getEndpoint();
       const payload = getPayload();
-      const res = await axios.post(endpoint, payload);
+      const endpoint = getEndpoint();
+      const res = await axios.post(endpoint, payload, { timeout: 8000 });
 
       if (isLogin) {
         const token = res.data.accessToken || res.data.token || res.data.access_token;
@@ -99,7 +95,7 @@ const Auth = ({ setToken, setUserRole }) => {
         if (role === 'provider') {
           localStorage.setItem('providerName', formData.provider_name.trim());
         } else {
-          localStorage.setItem('username', formData.identifier.trim() || formData.username.trim());
+          localStorage.setItem('username', formData.username.trim() || formData.login_email.trim());
         }
         setToken(token);
         setUserRole(role === 'provider' ? 'provider' : 'ev_user');
@@ -131,7 +127,9 @@ const Auth = ({ setToken, setUserRole }) => {
           message = err.response.data.error;
         }
       } else if (err.message) {
-        message = err.message;
+        message = err.message === 'Network Error'
+          ? 'Network error. Please check that API Gateway is running on port 8001.'
+          : err.message;
       }
       
       setError(message);
@@ -142,7 +140,7 @@ const Auth = ({ setToken, setUserRole }) => {
     setRole(newRole);
     setIsLogin(newLoginState);
     setFormData({
-      identifier: '',
+      login_email: '',
       username: '',
       email: '',
       password: '',
@@ -293,10 +291,10 @@ const Auth = ({ setToken, setUserRole }) => {
                 <div className="mb-3">
                   <label>Email</label>
                   <input
-                    type="text"
+                    type="email"
                     className="form-control"
-                    value={formData.identifier}
-                    onChange={handleFieldChange('identifier')}
+                    value={formData.login_email}
+                    onChange={handleFieldChange('login_email')}
                     required
                   />
                 </div>
