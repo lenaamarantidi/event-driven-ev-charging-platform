@@ -5,18 +5,19 @@
  * Κάθε microservice έχει το δικό του URL για απευθείας επικοινωνία
  */
 
-// Service-Specific URLs (matching docker-compose.yml ports)
-export const SERVICES = {
-  auth: 'http://127.0.0.1:8001/api/auth',           // Auth Service via API Gateway
-  providers: 'http://127.0.0.1:8001/api/providers', // Provider Management via API Gateway
-  analytics: 'http://127.0.0.1:8001/api/analytics', // Analytics via API Gateway
-  billing: 'http://127.0.0.1:8001/api/billing',     // Billing via API Gateway
-  reservations: 'http://127.0.0.1:8001/api/reservations', // Reservation via API Gateway
-  points: 'http://127.0.0.1:3001/api'        // Points Service (central) - direct
-};
+// Base URL for the API gateway. Can be overridden with VITE_API_BASE_URL.
+const DEFAULT_API_BASE_URL = 'http://127.0.0.1:8001/api';
+export const BASE_URL = import.meta.env.VITE_API_BASE_URL || DEFAULT_API_BASE_URL;
 
-// Legacy fallback (για backward compatibility)
-export const BASE_URL = "http://127.0.0.1:8001/api"; 
+// Service-Specific URLs (matching docker-compose.yml ports or runtime override)
+export const SERVICES = {
+  auth: `${BASE_URL}/auth`,           // Auth Service via API Gateway
+  providers: `${BASE_URL}/providers`, // Provider Management via API Gateway
+  analytics: `${BASE_URL}/analytics`, // Analytics via API Gateway
+  billing: `${BASE_URL}/billing`,     // Billing via API Gateway
+  reservations: `${BASE_URL}/reservations`, // Reservation via API Gateway
+  points: `${BASE_URL}/points`        // Points Service (central) - via API Gateway
+};
 
 /**
  * Get service URL by service name
