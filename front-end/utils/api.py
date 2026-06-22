@@ -8,7 +8,7 @@ urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 def login_user(username, password):
     try:
         response = requests.post(
-            f"{BASE_URL}/login", 
+            f"{BASE_URL}/auth/login", 
             json={"username": username, "password": password},
             verify=False
         )
@@ -16,11 +16,11 @@ def login_user(username, password):
     except Exception as e:
         return None, e
 
-def signup_user(username, password):
+def signup_user(username, email, password):
     try:
         response = requests.post(
-            f"{BASE_URL}/signup",
-            json={"username": username, "password": password},
+            f"{BASE_URL}/auth/register",
+            json={"username": username, "email": email, "password": password},
             verify=False
         )
         return response, None

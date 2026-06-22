@@ -10,18 +10,25 @@ USE provider_mgmt_db;
 CREATE TABLE IF NOT EXISTS providers (
   provider_id INT(10) UNSIGNED PRIMARY KEY AUTO_INCREMENT,
   provider_name VARCHAR(255) NOT NULL UNIQUE,
+  provider_email VARCHAR(255) NULL,
+  company_tin VARCHAR(32) NULL,
+  password_hash VARCHAR(255) NULL,
+  adapter_name VARCHAR(100) NULL COMMENT 'Assigned adapter service name',
+  integration_status VARCHAR(50) NOT NULL DEFAULT 'integration_pending' COMMENT 'integrated, integration_pending',
   base_url VARCHAR(500) NOT NULL,
   api_key VARCHAR(255) NOT NULL,
   endpoint_list_points VARCHAR(500) NOT NULL COMMENT 'GET endpoint to list charging points',
   endpoint_point_details VARCHAR(500) NOT NULL COMMENT 'GET endpoint to get point details',
   endpoint_reserve VARCHAR(500) NOT NULL COMMENT 'POST endpoint to make reservation',
-  endpoint_reserve_duration VARCHAR(500) NOT NULL COMMENT 'POST endpoint to make reservation with duration',
+  endpoint_reserve_duration VARCHAR(500) NULL COMMENT 'POST endpoint to make reservation with duration',
   status VARCHAR(50) DEFAULT 'active' COMMENT 'active, suspended, inactive',
   registered_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
   updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   INDEX idx_provider_name (provider_name),
   INDEX idx_provider_status (status),
-  INDEX idx_registered_at (registered_at)
+  INDEX idx_registered_at (registered_at),
+  UNIQUE KEY uq_provider_email (provider_email),
+  UNIQUE KEY uq_company_tin (company_tin)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 -- Provider Webhooks (optional, for future notification endpoints)

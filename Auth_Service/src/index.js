@@ -10,6 +10,17 @@ const { v4: uuidv4 } = require('uuid');
 const app = express();
 app.use(express.json());
 
+// CORS for frontend development and service communication
+app.use((req, res, next) => {
+  res.header('Access-Control-Allow-Origin', '*');
+  res.header('Access-Control-Allow-Methods', 'GET,POST,PUT,DELETE,OPTIONS');
+  res.header('Access-Control-Allow-Headers', 'Origin, X-Requested-With, Content-Type, Accept, Authorization');
+  if (req.method === 'OPTIONS') {
+    return res.sendStatus(204);
+  }
+  next();
+});
+
 const PORT = Number(process.env.PORT || 3100);
 const JWT_SECRET = process.env.JWT_SECRET || 'your_jwt_secret_key_change_in_production';
 const JWT_EXPIRY = process.env.JWT_EXPIRY || '15m';
@@ -150,7 +161,15 @@ function generateRefreshToken() {
 async function getUserByEmail(email) {
   const [rows] = await pool.query(
     `SELECT * FROM User WHERE email = ? ORDER BY user_id ASC LIMIT 1`,
-    [email.toLowerCase()]
+    [email]
+  );
+  return rows[0] || null;
+}
+
+async function getUserByUsername(username) {
+  const [rows] = await pool.query(
+    `SELECT * FROM User WHERE username = ? ORDER BY user_id ASC LIMIT 1`,
+    [username]
   );
   return rows[0] || null;
 }
@@ -193,25 +212,55 @@ app.post('/auth/register', async (req, res) => {
   try {
     const { email, password, username, firstName, lastName, phone } = req.body;
 
-    if (!validateEmail(email) || !validatePassword(password)) {
+    if (!username || typeof username !== 'string' || username.trim().length === 0) {
       return res.status(400).json({
-        error: 'Email and password are required',
-        details: 'password must be at least 8 characters and email must be valid'
+        error: 'Username is required for registration'
       });
     }
 
-    const existingUser = await getUserByEmail(email);
-    if (existingUser) {
+    if (!email || typeof email !== 'string' || email.trim().length === 0) {
+      return res.status(400).json({
+        error: 'Email is required for registration'
+      });
+    }
+
+    if (!validateEmail(email)) {
+      return res.status(400).json({
+        error: 'A valid email address is required'
+      });
+    }
+
+    if (!password || typeof password !== 'string') {
+      return res.status(400).json({
+        error: 'Password is required for registration'
+      });
+    }
+
+    if (!validatePassword(password)) {
+      return res.status(400).json({
+        error: 'Password must be at least 8 characters long'
+      });
+    }
+
+    const userNameValue = username.trim();
+    const emailValue = email.toLowerCase();
+
+    const existingUserByEmail = await getUserByEmail(emailValue);
+    if (existingUserByEmail) {
       return res.status(409).json({ error: 'User with this email already exists' });
     }
 
+    const existingUserByUsername = await getUserByUsername(userNameValue);
+    if (existingUserByUsername) {
+      return res.status(409).json({ error: 'This username is already taken' });
+    }
+
     const passwordHash = await hashData(password);
-    const userNameValue = username || email.split('@')[0];
 
     const [insertResult] = await pool.query(
       `INSERT INTO User (username, email, password_hash, first_name, last_name, phone)
        VALUES (?, ?, ?, ?, ?, ?)`,
-      [userNameValue, email.toLowerCase(), passwordHash, firstName || null, lastName || null, phone || null]
+      [userNameValue, emailValue, passwordHash, firstName || null, lastName || null, phone || null]
     );
 
     const user = await getUserById(insertResult.insertId);
@@ -226,26 +275,46 @@ app.post('/auth/register', async (req, res) => {
       refreshToken
     });
   } catch (err) {
+    console.error('Registration error:', err);
+    
+    // Handle MySQL duplicate entry errors (error code 1062)
+    if (err.code === 'ER_DUP_ENTRY' || err.errno === 1062) {
+      if (err.message && err.message.includes('username')) {
+        return res.status(409).json({ error: 'This username is already taken' });
+      } else if (err.message && err.message.includes('email')) {
+        return res.status(409).json({ error: 'User with this email already exists' });
+      }
+      return res.status(409).json({ error: 'This account already exists' });
+    }
+    
     return res.status(500).json({ error: 'Registration failed', message: err.message });
   }
 });
 
 app.post('/auth/login', async (req, res) => {
   try {
-    const { email, password } = req.body;
+    const { email, username, password } = req.body;
 
-    if (!validateEmail(email) || !validatePassword(password)) {
-      return res.status(400).json({ error: 'Email and password are required' });
+    if (!validatePassword(password)) {
+      return res.status(400).json({ error: 'Password is required and must be at least 8 characters' });
     }
 
-    const user = await getUserByEmail(email);
+    let user = null;
+    if (username && typeof username === 'string' && username.trim().length > 0) {
+      user = await getUserByUsername(username);
+    } else if (email && validateEmail(email)) {
+      user = await getUserByEmail(email);
+    } else {
+      return res.status(400).json({ error: 'Email or username is required for login' });
+    }
+
     if (!user || !user.password_hash) {
-      return res.status(401).json({ error: 'Invalid email or password' });
+      return res.status(401).json({ error: 'Invalid email/username or password' });
     }
 
     const passwordMatches = await compareHash(password, user.password_hash);
     if (!passwordMatches) {
-      return res.status(401).json({ error: 'Invalid email or password' });
+      return res.status(401).json({ error: 'Invalid email/username or password' });
     }
 
     const accessToken = generateAccessToken(user);
@@ -311,7 +380,9 @@ app.post('/auth/google', async (req, res) => {
     }
 
     const accessToken = generateAccessToken(user);
-    const refreshToken = generateRefreshToken();
+            if (existingUserByEmail) {
+              return res.status(409).json({ error: 'User with this email already exists' });
+            }
     await saveRefreshToken(user.user_id, refreshToken);
 
     return res.json({

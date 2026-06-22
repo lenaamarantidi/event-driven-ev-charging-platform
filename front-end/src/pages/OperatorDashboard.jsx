@@ -47,8 +47,10 @@ const OperatorDashboard = ({ setToken }) => {
       }
 
       // Κανονικοποίηση providers list
-      if (providersResult.success && Array.isArray(providersResult.data)) {
-        setProviders(providersResult.data);
+      // providerAPI.getAll() returns { total, providers: [...] }
+      if (providersResult.success && providersResult.data) {
+        const providerList = providersResult.data.providers || providersResult.data || [];
+        setProviders(providerList);
       } else {
         console.warn('Providers fetch error:', providersResult.error);
       }
@@ -319,26 +321,24 @@ const OperatorDashboard = ({ setToken }) => {
                       <tr className="table-light">
                         <th>Provider Name</th>
                         <th>Status</th>
-                        <th>Stations</th>
-                        <th>Users</th>
-                        <th>Revenue</th>
-                        <th>Last Sync</th>
+                        <th>Base URL</th>
+                        <th>State</th>
+                        <th>Registered</th>
                         <th>Actions</th>
                       </tr>
                     </thead>
                     <tbody>
                       {providers.map((provider) => (
-                        <tr key={provider.id}>
-                          <td className="fw-bold">{provider.name}</td>
+                        <tr key={provider.provider_id}>
+                          <td className="fw-bold">{provider.provider_name}</td>
                           <td>
                             <span className={`badge bg-${provider.status === 'active' ? 'success' : 'warning'}`}>
                               {provider.status === 'active' ? '🟢 Active' : '🟡 Inactive'}
                             </span>
                           </td>
-                          <td>{provider.stations_count || 0}</td>
-                          <td>{provider.users_count || 0}</td>
-                          <td>€{(provider.monthly_revenue || 0).toFixed(2)}</td>
-                          <td className="small">{provider.last_sync || 'N/A'}</td>
+                          <td>{provider.base_url || '-'}</td>
+                          <td>{provider.status}</td>
+                          <td>{provider.registered_at ? new Date(provider.registered_at).toLocaleDateString() : 'N/A'}</td>
                           <td>
                             <button className="btn btn-sm btn-outline-primary">View</button>
                           </td>

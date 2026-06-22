@@ -18,31 +18,31 @@ class Settings(BaseSettings):
     
     # Service URLs
     AUTH_SERVICE_URL: str = os.getenv(
-        "AUTH_SERVICE_URL", "http://auth-service:3100"
+        "AUTH_SERVICE_URL", "http://127.0.0.1:3100"
     )
     PROVIDER_SERVICE_URL: str = os.getenv(
-        "PROVIDER_SERVICE_URL", "http://provider-management-service:3101"
+        "PROVIDER_SERVICE_URL", "http://127.0.0.1:3101"
     )
     POINTS_SERVICE_URL: str = os.getenv(
-        "POINTS_SERVICE_URL", "http://central-service:3001"
+        "POINTS_SERVICE_URL", "http://127.0.0.1:3001"
     )
     RESERVATION_SERVICE_URL: str = os.getenv(
-        "RESERVATION_SERVICE_URL", "http://reservation-service:3009"
+        "RESERVATION_SERVICE_URL", "http://127.0.0.1:3009"
     )
     BILLING_SERVICE_URL: str = os.getenv(
-        "BILLING_SERVICE_URL", "http://billing-service:3103"
+        "BILLING_SERVICE_URL", "http://127.0.0.1:3103"
     )
     PAYMENT_SERVICE_URL: str = os.getenv(
-        "PAYMENT_SERVICE_URL", "http://payment-service:3107"
+        "PAYMENT_SERVICE_URL", "http://127.0.0.1:3107"
     )
     ANALYTICS_SERVICE_URL: str = os.getenv(
-        "ANALYTICS_SERVICE_URL", "http://analytics-service:3106"
+        "ANALYTICS_SERVICE_URL", "http://127.0.0.1:3106"
     )
     MAP_SERVICE_URL: str = os.getenv(
-        "MAP_SERVICE_URL", "http://map-service:3105"
+        "MAP_SERVICE_URL", "http://127.0.0.1:3105"
     )
     PROVIDER_API_SERVICE_URL: str = os.getenv(
-        "PROVIDER_API_SERVICE_URL", "http://provider-api-service:3200"
+        "PROVIDER_API_SERVICE_URL", "http://127.0.0.1:3200"
     )
     
     # Request settings

@@ -31,18 +31,25 @@ async function initializeDatabase() {
       CREATE TABLE IF NOT EXISTS providers (
         provider_id INT(10) UNSIGNED PRIMARY KEY AUTO_INCREMENT,
         provider_name VARCHAR(255) NOT NULL UNIQUE,
+        provider_email VARCHAR(255) NULL,
+        company_tin VARCHAR(32) NULL,
+        password_hash VARCHAR(255) NULL,
+        adapter_name VARCHAR(100) NULL COMMENT 'Assigned adapter service name',
+        integration_status VARCHAR(50) NOT NULL DEFAULT 'integration_pending' COMMENT 'integrated, integration_pending',
         base_url VARCHAR(500) NOT NULL,
         api_key VARCHAR(255) NOT NULL,
         endpoint_list_points VARCHAR(500) NOT NULL COMMENT 'GET endpoint to list charging points',
         endpoint_point_details VARCHAR(500) NOT NULL COMMENT 'GET endpoint to get point details',
         endpoint_reserve VARCHAR(500) NOT NULL COMMENT 'POST endpoint to make reservation',
-        endpoint_reserve_duration VARCHAR(500) NOT NULL COMMENT 'POST endpoint to make reservation with duration',
+        endpoint_reserve_duration VARCHAR(500) NULL COMMENT 'POST endpoint to make reservation with duration',
         status VARCHAR(50) DEFAULT 'active' COMMENT 'active, suspended, inactive',
         registered_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
         updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
         INDEX idx_provider_name (provider_name),
         INDEX idx_provider_status (status),
-        INDEX idx_registered_at (registered_at)
+        INDEX idx_registered_at (registered_at),
+        UNIQUE KEY uq_provider_email (provider_email),
+        UNIQUE KEY uq_company_tin (company_tin)
       ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
     `);
 
@@ -61,6 +68,56 @@ async function initializeDatabase() {
       ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
     `);
 
+    if (!(await columnExists('providers', 'provider_email'))) {
+      await connection.query('ALTER TABLE providers ADD COLUMN provider_email VARCHAR(255) NULL AFTER provider_name');
+    }
+
+    if (!(await columnExists('providers', 'company_tin'))) {
+      await connection.query('ALTER TABLE providers ADD COLUMN company_tin VARCHAR(32) NULL AFTER provider_email');
+    }
+
+    if (!(await columnExists('providers', 'password_hash'))) {
+      await connection.query('ALTER TABLE providers ADD COLUMN password_hash VARCHAR(255) NULL AFTER company_tin');
+    }
+
+    if (!(await columnExists('providers', 'adapter_name'))) {
+      await connection.query("ALTER TABLE providers ADD COLUMN adapter_name VARCHAR(100) NULL COMMENT 'Assigned adapter service name' AFTER password_hash");
+    }
+
+    if (!(await columnExists('providers', 'integration_status'))) {
+      await connection.query("ALTER TABLE providers ADD COLUMN integration_status VARCHAR(50) NOT NULL DEFAULT 'integration_pending' COMMENT 'integrated, integration_pending' AFTER adapter_name");
+    }
+
+    if (!(await columnExists('providers', 'endpoint_reserve_duration'))) {
+      await connection.query('ALTER TABLE providers ADD COLUMN endpoint_reserve_duration VARCHAR(500) NULL AFTER endpoint_reserve');
+    } else {
+      await connection.query('ALTER TABLE providers MODIFY endpoint_reserve_duration VARCHAR(500) NULL');
+    }
+
+    if (!(await indexExists('providers', 'uq_provider_email'))) {
+      await connection.query('ALTER TABLE providers ADD UNIQUE KEY uq_provider_email (provider_email)');
+    }
+
+    if (!(await indexExists('providers', 'uq_company_tin'))) {
+      await connection.query('ALTER TABLE providers ADD UNIQUE KEY uq_company_tin (company_tin)');
+    }
+
+    await connection.query(`
+      UPDATE providers
+      SET
+        adapter_name = CASE
+          WHEN LOWER(provider_name) = 'redplug' THEN 'provider-adapter-redplug'
+          WHEN LOWER(provider_name) = 'greenplug' THEN 'provider-adapter-greenplug'
+          WHEN LOWER(provider_name) = 'blueplug' THEN 'provider-adapter-blueplug'
+          ELSE adapter_name
+        END,
+        integration_status = CASE
+          WHEN LOWER(provider_name) IN ('redplug', 'greenplug', 'blueplug') THEN 'integrated'
+          ELSE 'integration_pending'
+        END
+      WHERE adapter_name IS NULL OR integration_status IS NULL OR integration_status = ''
+    `);
+
     connection.release();
     console.log('Database schema initialized successfully');
   } catch (err) {
@@ -72,6 +129,22 @@ async function initializeDatabase() {
 /**
  * Test database connection
  */
+async function indexExists(tableName, indexName) {
+  const [rows] = await pool.query(
+    `SELECT 1 FROM information_schema.statistics WHERE table_schema = DATABASE() AND table_name = ? AND index_name = ?`,
+    [tableName, indexName]
+  );
+  return rows.length > 0;
+}
+
+async function columnExists(tableName, columnName) {
+  const [rows] = await pool.query(
+    `SELECT 1 FROM information_schema.columns WHERE table_schema = DATABASE() AND table_name = ? AND column_name = ?`,
+    [tableName, columnName]
+  );
+  return rows.length > 0;
+}
+
 async function testConnection() {
   try {
     const connection = await pool.getConnection();

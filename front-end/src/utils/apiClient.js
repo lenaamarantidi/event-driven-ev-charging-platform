@@ -10,7 +10,7 @@
  */
 
 import axios from 'axios';
-import { SERVICES, API_CONFIG, getAuthHeaders } from '../config';
+import { BASE_URL, SERVICES, API_CONFIG, getAuthHeaders } from '../config';
 
 /**
  * Create axios instance με configuration
@@ -37,7 +37,7 @@ export const providerAPI = {
   register: async (providerData) => {
     try {
       const api = createApiInstance(SERVICES.providers);
-      const response = await api.post('/providers/register', providerData, getAuthHeaders());
+      const response = await api.post('/register', providerData, getAuthHeaders());
       return {
         success: true,
         data: response.data
@@ -57,7 +57,7 @@ export const providerAPI = {
   getAll: async () => {
     try {
       const api = createApiInstance(SERVICES.providers);
-      const response = await api.get('/providers', getAuthHeaders());
+      const response = await api.get('', getAuthHeaders());
       return {
         success: true,
         data: response.data
@@ -78,7 +78,7 @@ export const providerAPI = {
   getById: async (providerId) => {
     try {
       const api = createApiInstance(SERVICES.providers);
-      const response = await api.get(`/providers/${providerId}`, getAuthHeaders());
+      const response = await api.get(`/${providerId}`, getAuthHeaders());
       return {
         success: true,
         data: response.data
@@ -98,7 +98,7 @@ export const providerAPI = {
   suspend: async (providerId, reason) => {
     try {
       const api = createApiInstance(SERVICES.providers);
-      const response = await api.post(`/providers/${providerId}/suspend`, { reason }, getAuthHeaders());
+      const response = await api.post(`/${providerId}/suspend`, { reason }, getAuthHeaders());
       return {
         success: true,
         data: response.data
@@ -450,6 +450,33 @@ export const billingAPI = {
 };
 
 /**
+ * Points Service API (via Reservation Service)
+ * Unified endpoint για λήψη όλων των σημείων φόρτισης από όλους τους providers
+ */
+export const pointsAPI = {
+  /**
+   * GET /api/points
+   * Λήψη όλων των σημείων φόρτισης από τους adapters
+   */
+  getAll: async () => {
+    try {
+      const api = createApiInstance(SERVICES.points);
+      const response = await api.get('', getAuthHeaders());
+      return {
+        success: true,
+        data: response.data
+      };
+    } catch (error) {
+      return {
+        success: false,
+        error: error.response?.data?.message || error.message,
+        data: { points: [] }
+      };
+    }
+  }
+};
+
+/**
  * Reservation Service API
  * Unified endpoint για κράτηση σημείων φόρτισης
  */
@@ -465,7 +492,7 @@ export const reservationAPI = {
    */
   createReservation: async (reservationData) => {
     try {
-      const api = createApiInstance(SERVICES.reservations);
+      const api = createApiInstance(BASE_URL);
       const response = await api.post('/reserve', reservationData, getAuthHeaders());
       return {
         success: true,
@@ -486,7 +513,7 @@ export const reservationAPI = {
   getAll: async () => {
     try {
       const api = createApiInstance(SERVICES.reservations);
-      const response = await api.get('/reservations', getAuthHeaders());
+      const response = await api.get('', getAuthHeaders());
       return {
         success: true,
         data: response.data
@@ -507,7 +534,7 @@ export const reservationAPI = {
   getById: async (reservationId) => {
     try {
       const api = createApiInstance(SERVICES.reservations);
-      const response = await api.get(`/reservations/${reservationId}`, getAuthHeaders());
+      const response = await api.get(`/${reservationId}`, getAuthHeaders());
       return {
         success: true,
         data: response.data
@@ -548,7 +575,8 @@ export const apiClient = {
   providers: providerAPI,
   analytics: analyticsAPI,
   billing: billingAPI,
-  reservations: reservationAPI
+  reservations: reservationAPI,
+  points: pointsAPI
 };
 
 export default apiClient;

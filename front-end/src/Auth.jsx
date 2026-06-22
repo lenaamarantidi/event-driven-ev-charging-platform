@@ -1,18 +1,17 @@
-import { useState } from 'react';
+﻿import { useState } from 'react';
 import axios from 'axios';
-import { getServiceURL } from '../config';
+import { BASE_URL, getServiceURL } from '../config';
 
 const Auth = ({ setToken, setUserRole }) => {
   const [isLogin, setIsLogin] = useState(true);
   const [role, setRole] = useState('ev_user');
   const [formData, setFormData] = useState({
-    login_email: '',
+    identifier: '',
     username: '',
     email: '',
     password: '',
     provider_name: '',
     provider_email: '',
-    company_tin: '',
     base_url: '',
     api_key: '',
     endpoint_list_points: '',
@@ -31,8 +30,7 @@ const Auth = ({ setToken, setUserRole }) => {
       const serviceUrl = getServiceURL('providers');
       return `${serviceUrl}/${isLogin ? 'login' : 'register'}`;
     }
-    const serviceUrl = getServiceURL('auth');
-    return `${serviceUrl}/${isLogin ? 'login' : 'register'}`;
+    return `${BASE_URL}/auth/${isLogin ? 'login' : 'register'}`;
   };
 
   const getPayload = () => {
@@ -47,7 +45,6 @@ const Auth = ({ setToken, setUserRole }) => {
       return {
         provider_name: formData.provider_name.trim(),
         provider_email: formData.provider_email.trim(),
-        company_tin: formData.company_tin.trim(),
         password: formData.password,
         base_url: formData.base_url.trim(),
         api_key: formData.api_key.trim(),
@@ -59,10 +56,14 @@ const Auth = ({ setToken, setUserRole }) => {
     }
 
     if (isLogin) {
-      return {
-        email: formData.login_email.trim(),
-        password: formData.password
-      };
+      const identifier = formData.identifier.trim();
+      const payload = { password: formData.password };
+      if (identifier.includes('@')) {
+        payload.email = identifier;
+      } else {
+        payload.username = identifier;
+      }
+      return payload;
     }
 
     return {
@@ -71,21 +72,15 @@ const Auth = ({ setToken, setUserRole }) => {
       password: formData.password
     };
   };
+
   const handleSubmit = async (e) => {
     e.preventDefault();
     setError('');
-    // Client-side validation for signup flows: show clear error for short passwords
-    if (!isLogin) {
-      if (!formData.password || formData.password.length < 8) {
-        setError('Password must be at least 8 characters');
-        return;
-      }
-    }
 
     try {
-      const payload = getPayload();
       const endpoint = getEndpoint();
-      const res = await axios.post(endpoint, payload, { timeout: 8000 });
+      const payload = getPayload();
+      const res = await axios.post(endpoint, payload);
 
       if (isLogin) {
         const token = res.data.accessToken || res.data.token || res.data.access_token;
@@ -100,7 +95,7 @@ const Auth = ({ setToken, setUserRole }) => {
             localStorage.setItem('providerId', String(res.data.providerId));
           }
         } else {
-          localStorage.setItem('username', formData.username.trim() || formData.login_email.trim());
+          localStorage.setItem('username', formData.identifier.trim() || formData.username.trim());
         }
         setToken(token);
         setUserRole(role === 'provider' ? 'provider' : 'ev_user');
@@ -110,7 +105,6 @@ const Auth = ({ setToken, setUserRole }) => {
       }
     } catch (err) {
       let message = 'Authentication failed. Check credentials or server.';
-      const errorDetails = err.response?.data?.details;
       
       // Handle specific error messages from backend
       const errorText = (err.response?.data?.error || '').toLowerCase();
@@ -124,20 +118,9 @@ const Auth = ({ setToken, setUserRole }) => {
           message = err.response.data.error || 'This account already exists.';
         }
       } else if (err.response?.data?.error) {
-        // Check for username taken error in the error message text (case-insensitive)
-        if (errorText.includes('username') && (errorText.includes('taken') || errorText.includes('exists'))) {
-          message = 'This username is taken, please choose another one.';
-        } else if (errorText.includes('email') && (errorText.includes('registered') || errorText.includes('exists'))) {
-          message = 'This email is already registered, please use another one.';
-        } else if (Array.isArray(errorDetails) && errorDetails.length > 0) {
-          message = errorDetails.join(' | ');
-        } else {
-          message = err.response.data.error;
-        }
+        message = err.response.data.error;
       } else if (err.message) {
-        message = err.message === 'Network Error'
-          ? 'Network error. Please check that API Gateway is running on port 8001.'
-          : err.message;
+        message = err.message;
       }
       
       setError(message);
@@ -148,13 +131,12 @@ const Auth = ({ setToken, setUserRole }) => {
     setRole(newRole);
     setIsLogin(newLoginState);
     setFormData({
-      login_email: '',
+      identifier: '',
       username: '',
       email: '',
       password: '',
       provider_name: '',
       provider_email: '',
-      company_tin: '',
       base_url: '',
       api_key: '',
       endpoint_list_points: '',
@@ -167,7 +149,7 @@ const Auth = ({ setToken, setUserRole }) => {
 
   return (
     <div className="container d-flex justify-content-center align-items-center vh-100">
-      <div className="card p-4 shadow" style={{ width: '500px', maxHeight: '90vh' }}>
+      <div className="card p-4 shadow" style={{ width: '500px' }}>
         <h2 className="text-center">⚡ charger.io Access</h2>
         {error && <div className="alert alert-danger">{error}</div>}
 
@@ -196,14 +178,11 @@ const Auth = ({ setToken, setUserRole }) => {
           </select>
         </div>
 
-        <form
-          onSubmit={handleSubmit}
-          style={role === 'provider' && !isLogin ? { maxHeight: '60vh', overflowY: 'auto', paddingRight: '8px' } : undefined}
-        >
+        <form onSubmit={handleSubmit}>
           {role === 'provider' ? (
             <>
               <div className="mb-3">
-                <label>Company Name</label>
+                <label>{isLogin ? 'Provider Name' : 'Provider Name'}</label>
                 <input
                   type="text"
                   className="form-control"
@@ -215,22 +194,12 @@ const Auth = ({ setToken, setUserRole }) => {
               {!isLogin && (
                 <>
                   <div className="mb-3">
-                    <label>Company Email</label>
+                    <label>Provider Email</label>
                     <input
                       type="email"
                       className="form-control"
                       value={formData.provider_email}
                       onChange={handleFieldChange('provider_email')}
-                      required
-                    />
-                  </div>
-                  <div className="mb-3">
-                    <label>Company TIN</label>
-                    <input
-                      type="text"
-                      className="form-control"
-                      value={formData.company_tin}
-                      onChange={handleFieldChange('company_tin')}
                       required
                     />
                   </div>
@@ -285,7 +254,7 @@ const Auth = ({ setToken, setUserRole }) => {
                     />
                   </div>
                   <div className="mb-3">
-                    <label>Reserve with duration Endpoint (optional)</label>
+                    <label>Reserve Duration Endpoint (optional)</label>
                     <input
                       type="text"
                       className="form-control"
@@ -313,10 +282,10 @@ const Auth = ({ setToken, setUserRole }) => {
                 <div className="mb-3">
                   <label>Email</label>
                   <input
-                    type="email"
+                    type="text"
                     className="form-control"
-                    value={formData.login_email}
-                    onChange={handleFieldChange('login_email')}
+                    value={formData.identifier}
+                    onChange={handleFieldChange('identifier')}
                     required
                   />
                 </div>

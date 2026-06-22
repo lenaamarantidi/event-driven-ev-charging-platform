@@ -38,20 +38,40 @@ def login_page():
             st.markdown("Create a new account.")
             with st.form("signup_form"):
                 new_user = st.text_input("Choose Username", key="signup_user")
+                new_email = st.text_input("Email", key="signup_email")
                 new_pass = st.text_input("Choose Password", type="password", key="signup_pass")
+                confirm_pass = st.text_input("Confirm Password", type="password", key="signup_confirm")
                 signup_button = st.form_submit_button("Create Account", use_container_width=True)
-                
+
                 if signup_button:
-                    if new_user and new_pass:
-                        res, err = signup_user(new_user, new_pass)
+                    if not new_user or not new_email or not new_pass or not confirm_pass:
+                        st.warning("Please fill in all fields.")
+                    elif new_pass != confirm_pass:
+                        st.warning("Passwords do not match.")
+                    else:
+                        res, err = signup_user(new_user, new_email, new_pass)
                         if res:
                             if res.status_code == 201:
                                 st.success("Account created! Please switch to Login tab.")
                             elif res.status_code == 409:
-                                st.warning("Username already exists.")
+                                try:
+                                    data = res.json()
+                                    error_msg = data.get('error', '')
+                                    if 'email' in error_msg.lower():
+                                        st.warning("This email is already registered, please use another one.")
+                                    elif 'username' in error_msg.lower():
+                                        st.warning("This username is taken, please choose another one.")
+                                    else:
+                                        st.warning(error_msg)
+                                except Exception:
+                                    st.warning("This account already exists.")
+                            elif res.status_code == 400:
+                                try:
+                                    data = res.json()
+                                    st.error(data.get('error', 'Registration failed.'))
+                                except Exception:
+                                    st.error("Registration failed. Check your input and try again.")
                             else:
                                 st.error("Registration failed.")
                         else:
                             st.error(f"Server connection error: {err}. Please try again later.")
-                    else:
-                        st.warning("Please fill in all fields.")

@@ -223,6 +223,10 @@ services:
       MARIADB_USER: root
       MARIADB_PASSWORD: root
       RABBITMQ_URL: amqp://guest:guest@rabbitmq:5672
+      REDPLUG_ADAPTER_URL: http://provider-adapter-redplug:3111
+      GREENPLUG_ADAPTER_URL: http://provider-adapter-greenplug:3112
+      BLUEPLUG_ADAPTER_URL: http://provider-adapter-blueplug:3113
+      SYNC_INGEST_TOKEN: sync-ingest-dev-token
     depends_on:
       rabbitmq:
         condition: service_healthy
@@ -248,12 +252,10 @@ services:
       DB_PASSWORD: reservation_pass
       DB_NAME: reservation_db
       RABBITMQ_URL: amqp://guest:guest@rabbitmq:5672
-      REDPLUG_API_URL: https://davinci.softlab.ntua.gr/saas26/redPlug/api
-      GREENPLUG_API_URL: https://davinci.softlab.ntua.gr/saas26/greenPlug/api
-      BLUEPLUG_API_URL: https://davinci.softlab.ntua.gr/saas26/bluePlug/api
-      REDPLUG_API_KEY: "sk_saas_5dec282b47047b6eced41e64"
-      GREENPLUG_API_KEY: "sk_saas_5dec282b47047b6eced41e64"
-      BLUEPLUG_API_KEY: "sk_saas_5dec282b47047b6eced41e64"
+      REDPLUG_ADAPTER_URL: http://provider-adapter-redplug:3111
+      GREENPLUG_ADAPTER_URL: http://provider-adapter-greenplug:3112
+      BLUEPLUG_ADAPTER_URL: http://provider-adapter-blueplug:3113
+      # Provider API URLs/KEYs are configured in adapter services (they call the external provider APIs)
     depends_on:
       rabbitmq:
         condition: service_healthy
@@ -381,11 +383,8 @@ services:
       DB_USER: provider_user
       DB_PASSWORD: provider_pass
       DB_NAME: provider_db
-      RABBITMQ_URL: amqp://guest:guest@rabbitmq:5672
     depends_on:
       mariadb-provider:
-        condition: service_healthy
-      rabbitmq:
         condition: service_healthy
     networks:
       - saasplug-network
@@ -506,43 +505,81 @@ services:
       - saasplug-network
     restart: unless-stopped
 
-  # Sync Service (no port, runs as background worker)
-  sync-service:
+  # Sync Service removed because Collector_Service directory is missing.
+  # sync-service:
+  #   build:
+  #     context: ./Collector_Service
+  #   container_name: saasplug-sync
+  #   environment:
+  #     NODE_ENV: production
+  #     DB_HOST: mysql-central
+  #     DB_USER: root
+  #     DB_PASSWORD: root
+  #     RABBITMQ_URL: amqp://guest:guest@rabbitmq:5672
+  #     REDPLUG_API_URL: https://davinci.softlab.ntua.gr/saas26/redPlug/api
+  #     GREENPLUG_API_URL: https://davinci.softlab.ntua.gr/saas26/greenPlug/api
+  #     BLUEPLUG_API_URL: https://davinci.softlab.ntua.gr/saas26/bluePlug/api
+  #   depends_on:
+  #     rabbitmq:
+  #       condition: service_healthy
+  #     mysql-central:
+  #       condition: service_healthy
+  #   networks:
+  #     - saasplug-network
+  #   restart: unless-stopped
+
+  # Provider API Service (OpenAPI 3.1.0)
+  # Provider Adapter services (one per provider)
+  provider-adapter-redplug:
     build:
-      context: ./Collector_Service
-    container_name: saasplug-sync
+      context: ./Provider_Adapter_redPlug
+    container_name: saasplug-provider-adapter-redplug
+    ports:
+      - "3111:3111"
     environment:
+      PORT: 3111
       NODE_ENV: production
-      DB_HOST: mysql-central
-      DB_USER: root
-      DB_PASSWORD: root
-      RABBITMQ_URL: amqp://guest:guest@rabbitmq:5672
       REDPLUG_API_URL: https://davinci.softlab.ntua.gr/saas26/redPlug/api
-      GREENPLUG_API_URL: https://davinci.softlab.ntua.gr/saas26/greenPlug/api
-      BLUEPLUG_API_URL: https://davinci.softlab.ntua.gr/saas26/bluePlug/api
-    depends_on:
-      rabbitmq:
-        condition: service_healthy
-      mysql-central:
-        condition: service_healthy
+      REDPLUG_API_KEY: "sk_saas_5dec282b47047b6eced41e64"
+      POINTS_SERVICE_URL: http://central-service:3001
+      ADAPTER_SYNC_INTERVAL_MS: 86400000
+      SYNC_INGEST_TOKEN: sync-ingest-dev-token
     networks:
       - saasplug-network
     restart: unless-stopped
 
-  # Provider API Service (OpenAPI 3.1.0)
-  provider-api-service:
+  provider-adapter-greenplug:
     build:
-      context: .
-      dockerfile: Provider_API_Service/Dockerfile
-    container_name: saasplug-provider-api
+      context: ./Provider_Adapter_greenPlug
+    container_name: saasplug-provider-adapter-greenplug
     ports:
-      - "3200:3200"
+      - "3112:3112"
     environment:
-      PORT: 3200
+      PORT: 3112
       NODE_ENV: production
-      REDPLUG_BASE_URL: https://davinci.softlab.ntua.gr/saas26/redPlug/api
-      GREENPLUG_BASE_URL: https://davinci.softlab.ntua.gr/saas26/greenPlug/api
-      BLUEPLUG_BASE_URL: https://davinci.softlab.ntua.gr/saas26/bluePlug/api
+      GREENPLUG_API_URL: https://davinci.softlab.ntua.gr/saas26/greenPlug/api
+      GREENPLUG_API_KEY: "sk_saas_5dec282b47047b6eced41e64"
+      POINTS_SERVICE_URL: http://central-service:3001
+      ADAPTER_SYNC_INTERVAL_MS: 86400000
+      SYNC_INGEST_TOKEN: sync-ingest-dev-token
+    networks:
+      - saasplug-network
+    restart: unless-stopped
+
+  provider-adapter-blueplug:
+    build:
+      context: ./Provider_Adapter_bluePlug
+    container_name: saasplug-provider-adapter-blueplug
+    ports:
+      - "3113:3113"
+    environment:
+      PORT: 3113
+      NODE_ENV: production
+      BLUEPLUG_API_URL: https://davinci.softlab.ntua.gr/saas26/bluePlug/api
+      BLUEPLUG_API_KEY: "sk_saas_5dec282b47047b6eced41e64"
+      POINTS_SERVICE_URL: http://central-service:3001
+      ADAPTER_SYNC_INTERVAL_MS: 86400000
+      SYNC_INGEST_TOKEN: sync-ingest-dev-token
     networks:
       - saasplug-network
     restart: unless-stopped

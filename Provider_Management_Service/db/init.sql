@@ -1,21 +1,45 @@
 -- Provider Management Service database bootstrap (MariaDB)
--- Requested schema: Provider table
+-- Create the provider_db schema and tables used by Provider_Management_Service
 
+DROP DATABASE IF EXISTS provider_db;
+CREATE DATABASE IF NOT EXISTS provider_db CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+USE provider_db;
+
+DROP TABLE IF EXISTS provider_webhooks;
 DROP TABLE IF EXISTS providers;
-DROP TABLE IF EXISTS provider_audit_log;
 
-CREATE TABLE IF NOT EXISTS Provider (
-  provider_id INT PRIMARY KEY AUTO_INCREMENT,
-  company_name VARCHAR(255) NOT NULL,
-  password_hash VARCHAR(255) NOT NULL,
-  TIN DECIMAL(9,0) NOT NULL,
-  email VARCHAR(255) NOT NULL,
-  contact_number DECIMAL(10,0) NULL,
-  API_endpoint VARCHAR(255) NOT NULL,
-  API_key VARCHAR(255) NOT NULL,
-  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+CREATE TABLE IF NOT EXISTS providers (
+  provider_id INT(10) UNSIGNED PRIMARY KEY AUTO_INCREMENT,
+  provider_name VARCHAR(255) NOT NULL UNIQUE,
+  provider_email VARCHAR(255) NULL,
+  company_tin VARCHAR(32) NULL,
+  password_hash VARCHAR(255) NULL,
+  adapter_name VARCHAR(100) NULL COMMENT 'Assigned adapter service name',
+  integration_status VARCHAR(50) NOT NULL DEFAULT 'integration_pending' COMMENT 'integrated, integration_pending',
+  base_url VARCHAR(500) NOT NULL,
+  api_key VARCHAR(255) NOT NULL,
+  endpoint_list_points VARCHAR(500) NOT NULL COMMENT 'GET endpoint to list charging points',
+  endpoint_point_details VARCHAR(500) NOT NULL COMMENT 'GET endpoint to get point details',
+  endpoint_reserve VARCHAR(500) NOT NULL COMMENT 'POST endpoint to make reservation',
+  endpoint_reserve_duration VARCHAR(500) NULL COMMENT 'POST endpoint to make reservation with duration',
+  status VARCHAR(50) DEFAULT 'active' COMMENT 'active, suspended, inactive',
+  registered_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
   updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-  UNIQUE KEY uq_provider_company_name (company_name),
-  UNIQUE KEY uq_provider_tin (TIN),
-  UNIQUE KEY uq_provider_email (email)
+  INDEX idx_provider_name (provider_name),
+  INDEX idx_provider_status (status),
+  INDEX idx_registered_at (registered_at),
+  UNIQUE KEY uq_provider_email (provider_email),
+  UNIQUE KEY uq_company_tin (company_tin)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+CREATE TABLE IF NOT EXISTS provider_webhooks (
+  webhook_id INT(10) UNSIGNED PRIMARY KEY AUTO_INCREMENT,
+  provider_id INT(10) UNSIGNED NOT NULL,
+  event_type VARCHAR(100) NOT NULL,
+  webhook_url VARCHAR(500) NOT NULL,
+  is_active BOOLEAN DEFAULT 1,
+  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  FOREIGN KEY (provider_id) REFERENCES providers(provider_id) ON DELETE CASCADE,
+  INDEX idx_provider_id (provider_id),
+  INDEX idx_event_type (event_type)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
