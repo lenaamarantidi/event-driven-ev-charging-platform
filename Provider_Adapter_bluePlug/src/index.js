@@ -9,6 +9,9 @@ const PORT = Number(process.env.PORT || 3113);
 
 const BASE_URL = process.env.BLUEPLUG_API_URL || 'https://davinci.softlab.ntua.gr/saas26/bluePlug/api';
 const API_KEY = process.env.BLUEPLUG_API_KEY || 'blueplug-key-123';
+const POINTS_SERVICE_URL = process.env.POINTS_SERVICE_URL || 'http://central-service:3001';
+const ADAPTER_SYNC_INTERVAL_MS = Number(process.env.ADAPTER_SYNC_INTERVAL_MS || 86400000);
+const SYNC_INGEST_TOKEN = process.env.SYNC_INGEST_TOKEN || '';
 
 async function proxyRequest(url, method = 'get', data = null) {
   const opts = { method, url, headers: { Authorization: `Bearer ${API_KEY}`, Accept: 'application/json' }, timeout: 10000 };
@@ -17,12 +20,54 @@ async function proxyRequest(url, method = 'get', data = null) {
   return resp.data;
 }
 
+function normalizePointForCentral(p) {
+  return {
+    pointId: p.uid ?? p.id ?? p.chargerId,
+    providerName: 'bluePlug',
+    status: p.currentStatus ?? (p.available ? 'available' : 'occupied'),
+    lon: p.lng ?? p.geo?.[1],
+    lat: p.lat ?? p.geo?.[0],
+    capacityKw: p.cap,
+    kwhPrice: p.pricePerKwh,
+    connector: p.connector,
+    locationName: p.locationName,
+    address: p.address,
+    reservationEndTime: p.reservationEnd,
+    raw: p
+  };
+}
+
+async function fetchNormalizedPoints() {
+  const data = await proxyRequest(`${BASE_URL}/locations`);
+  return Array.isArray(data) ? data.map(normalizePointForCentral) : [];
+}
+
+async function syncToPointsService(trigger = 'interval') {
+  const points = await fetchNormalizedPoints();
+  const headers = { 'Content-Type': 'application/json' };
+  if (SYNC_INGEST_TOKEN) {
+    headers['x-sync-token'] = SYNC_INGEST_TOKEN;
+  }
+
+  const response = await axios.post(
+    `${POINTS_SERVICE_URL.replace(/\/$/, '')}/internal/providers/bluePlug/sync`,
+    {
+      provider: 'bluePlug',
+      snapshot: true,
+      points
+    },
+    { timeout: 15000, headers }
+  );
+
+  console.log(`[bluePlug] Sync (${trigger}) completed`, response.data);
+  return response.data;
+}
+
 app.get('/health', (req, res) => res.json({ status: 'ok', provider: 'bluePlug' }));
 
 app.get('/api/points', async (req, res) => {
   try {
-    const data = await proxyRequest(`${BASE_URL}/locations`);
-    const points = Array.isArray(data) ? data.map(p => ({ pointId: p.uid ?? p.id, providerName: 'bluePlug', status: p.available ? 'available' : 'occupied', lon: p.lng, lat: p.lat, raw: p })) : [];
+    const points = await fetchNormalizedPoints();
     res.json({ points });
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
@@ -92,4 +137,26 @@ app.post('/api/reserve', async (req, res) => {
   }
 });
 
-app.listen(PORT, () => console.log(`✓ bluePlug adapter listening on ${PORT}`));
+app.post('/internal/sync-now', async (req, res) => {
+  try {
+    const result = await syncToPointsService('manual');
+    res.json(result);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.listen(PORT, () => {
+  console.log(`✓ bluePlug adapter listening on ${PORT}`);
+  console.log(`[bluePlug] Sync interval ms: ${ADAPTER_SYNC_INTERVAL_MS}`);
+
+  syncToPointsService('startup').catch(err => {
+    console.error('[bluePlug] Startup sync failed:', err.message);
+  });
+
+  setInterval(() => {
+    syncToPointsService('interval').catch(err => {
+      console.error('[bluePlug] Interval sync failed:', err.message);
+    });
+  }, ADAPTER_SYNC_INTERVAL_MS);
+});

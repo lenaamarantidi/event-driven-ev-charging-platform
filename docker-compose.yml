@@ -226,6 +226,7 @@ services:
       REDPLUG_ADAPTER_URL: http://provider-adapter-redplug:3111
       GREENPLUG_ADAPTER_URL: http://provider-adapter-greenplug:3112
       BLUEPLUG_ADAPTER_URL: http://provider-adapter-blueplug:3113
+      SYNC_INGEST_TOKEN: sync-ingest-dev-token
     depends_on:
       rabbitmq:
         condition: service_healthy
@@ -540,6 +541,9 @@ services:
       NODE_ENV: production
       REDPLUG_API_URL: https://davinci.softlab.ntua.gr/saas26/redPlug/api
       REDPLUG_API_KEY: "sk_saas_5dec282b47047b6eced41e64"
+      POINTS_SERVICE_URL: http://central-service:3001
+      ADAPTER_SYNC_INTERVAL_MS: 86400000
+      SYNC_INGEST_TOKEN: sync-ingest-dev-token
     networks:
       - saasplug-network
     restart: unless-stopped
@@ -555,6 +559,9 @@ services:
       NODE_ENV: production
       GREENPLUG_API_URL: https://davinci.softlab.ntua.gr/saas26/greenPlug/api
       GREENPLUG_API_KEY: "sk_saas_5dec282b47047b6eced41e64"
+      POINTS_SERVICE_URL: http://central-service:3001
+      ADAPTER_SYNC_INTERVAL_MS: 86400000
+      SYNC_INGEST_TOKEN: sync-ingest-dev-token
     networks:
       - saasplug-network
     restart: unless-stopped
@@ -570,6 +577,9 @@ services:
       NODE_ENV: production
       BLUEPLUG_API_URL: https://davinci.softlab.ntua.gr/saas26/bluePlug/api
       BLUEPLUG_API_KEY: "sk_saas_5dec282b47047b6eced41e64"
+      POINTS_SERVICE_URL: http://central-service:3001
+      ADAPTER_SYNC_INTERVAL_MS: 86400000
+      SYNC_INGEST_TOKEN: sync-ingest-dev-token
     networks:
       - saasplug-network
     restart: unless-stopped
