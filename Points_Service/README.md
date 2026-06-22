@@ -109,6 +109,97 @@ vwx234        mariadb:11                 "docker-entrypoint.s…"    5 seconds a
 }
 ```
 
+### PUT /db/points/:pointId
+**Description:** Update a specific charging point
+**Request Body:** Any combination of point fields:
+- `status` (string): available, reserved, offline, etc.
+- `capacity_kw` (number): Capacity in kW
+- `kwh_price` (number): Price per kWh
+- `connector` (string): Connector type
+- `location_name` (string): Location name
+- `address` (string): Address
+- `reservation_end_time` (string): Reservation end time
+- `lon` (number): Longitude
+- `lat` (number): Latitude
+
+**Special Behavior:**
+- If service is `redPlug`, `greenPlug`, or `bluePlug`: Also updates central DB
+- If service is `central`: Finds the provider from `provider_name` and updates that service's DB
+- Returns update results from all affected services
+
+**Response:**
+```json
+{
+  "message": "Point update operation completed",
+  "currentService": {
+    "service": "greenPlug",
+    "updated": true,
+    "point": { ... }
+  },
+  "centralService": {
+    "service": "central",
+    "updated": true,
+    "result": { ... }
+  }
+}
+```
+
+### POST /db/repopulate
+**Description:** Repopulate points database from provider APIs
+**Request Body (optional):**
+```json
+{
+  "points": ["id1", "id2", ...]  // Filter to specific point IDs
+}
+```
+
+**Special Behavior for Central Service:**
+- When `SERVICE=central`: Repopulates from all 3 providers (redPlug, greenPlug, bluePlug)
+- Triggers repopulation on individual service containers via HTTP
+- Fetches points from all services and aggregates in central DB
+- Also calls `repopulate_central()` to ensure cross-service sync
+
+**Response:**
+```json
+{
+  "service": "central",
+  "providers": [
+    { "plugKey": "redPlug", "fetched": 100, "newCount": 100 },
+    { "plugKey": "greenPlug", "fetched": 150, "newCount": 150 },
+    { "plugKey": "bluePlug", "fetched": 120, "newCount": 120 }
+  ],
+  "allSuccess": true,
+  "centralRepopulate": {
+    "message": "Central DB repopulated from all 3 services",
+    "totalPoints": 370,
+    "success": true
+  }
+}
+```
+
+## Helper Functions
+
+### repopulate(service, filterIds)
+Helper function to repopulate points from a specific provider API.
+- Fetches points from provider API
+- Filters by point IDs if provided
+- Inserts/updates points in the database
+- Returns payload with counts and metadata
+
+### repopulate_central(req)
+Helper function to repopulate central DB by fetching from all 3 individual services via HTTP.
+- Triggers repopulation on red, green, blue service containers
+- Waits for repopulation to complete
+- Fetches points from each service via `/api/points`
+- Aggregates and inserts all points into central DB
+- Converts ISO datetime strings to MySQL format
+
+### scheduleReservationExpiry(pointId, reservationEndTime)
+Enhanced to update all relevant services when reservation expires:
+- Updates current service's DB when reservation expires
+- If current service is red/green/blue: Also updates central DB via PUT `/db/points/:pointId`
+- If current service is central: Finds provider and updates that service's DB via PUT `/db/points/:pointId`
+
 ## Docker Compose Files
 
 ### docker-compose.points.services.yml
@@ -130,6 +221,10 @@ vwx234        mariadb:11                 "docker-entrypoint.s…"    5 seconds a
 | `MARIADB_HOST` | Database host | `host.docker.internal` |
 | `MARIADB_PORT` | Database port | Dynamic (from start script) |
 | `BEARER_TOKEN` | Authentication token | `sk_saas_5dec282b47047b6eced41e64` |
+| `POINTS_RED_PORT` | Red service HTTP port | Dynamic (from start script) |
+| `POINTS_GREEN_PORT` | Green service HTTP port | Dynamic (from start script) |
+| `POINTS_BLUE_PORT` | Blue service HTTP port | Dynamic (from start script) |
+| `POINTS_CENTRAL_PORT` | Central service HTTP port | Dynamic (from start script) |
 
 ## Notes
 
@@ -137,3 +232,5 @@ vwx234        mariadb:11                 "docker-entrypoint.s…"    5 seconds a
 - Each provider has its own service instance and database
 - Uses `saasplug-points-network` for internal communication
 - Health checks are configured for all containers
+- **Cross-Service Synchronization:** When updating points via `PUT /db/points/:pointId` or when reservations expire, the service automatically propagates updates to relevant services (central DB for individual services, or specific service DB for central service)
+- **Central Service Aggregation:** The central service can fetch and aggregate points from all 3 individual services via HTTP
