@@ -15,8 +15,8 @@ app.use(express.json());
 
 // Import modules
 const { initializeDatabase, testDatabaseConnection, getPool } = require('./db');
-const { connectWithRetry, publishReservationEvent, publishAnalyticsDaily } = require('./rabbitmq');
-const { createReservation } = require('./controllers');
+const { connectWithRetry, publishReservationEvent, publishAnalyticsDaily, requestPointLookup, requestAdapterReservation } = require('./rabbitmq');
+const { logReservation } = require('./db');
 
 
 // To σωστό port σύμφωνα με το docker-compose.yml
@@ -43,84 +43,163 @@ app.get('/health', (req, res) => {
   });
 });
 
+function buildReservationResponse(pointId, status, reservationEndTime) {
+  return {
+    pointid: String(pointId),
+    status: String(status || 'failed'),
+    reservationendtime: String(reservationEndTime || '1970-01-01 00:00')
+  };
+}
+
+function formatDateTimeForSpec(date) {
+  const d = new Date(date);
+  const parts = new Intl.DateTimeFormat('en-GB', {
+    timeZone: 'Europe/Athens',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    hourCycle: 'h23'
+  }).formatToParts(d);
+
+  const getPart = (type) => parts.find((p) => p.type === type)?.value || '';
+  const yyyy = getPart('year');
+  const mm = getPart('month');
+  const dd = getPart('day');
+  const hh = getPart('hour');
+  const min = getPart('minute');
+  return `${yyyy}-${mm}-${dd} ${hh}:${min}`;
+}
+
+function normalizeProviderName(value) {
+  if (!value) return null;
+  const raw = String(value).trim().toLowerCase();
+  if (raw === 'redplug') return 'redPlug';
+  if (raw === 'greenplug') return 'greenPlug';
+  if (raw === 'blueplug') return 'bluePlug';
+  return null;
+}
+
+async function handleReservationRequest({ pointId, minutes, userId, providerNameFromBody }) {
+  const reservationId = uuidv4();
+  const duration = Number(minutes ?? 60);
+
+  if (!Number.isFinite(duration) || duration < 1) {
+    throw new Error('minutes must be an integer >= 1');
+  }
+
+  let providerName = normalizeProviderName(providerNameFromBody);
+  let pointSnapshot = null;
+  let providerFromLookup = null;
+
+  const lookup = await requestPointLookup(pointId);
+  if (!lookup?.found) {
+    console.warn(`[RESERVE] Point lookup miss pointId=${pointId}`);
+    return {
+      success: false,
+      reservationId,
+      providerName: null,
+      reservation: buildReservationResponse(pointId, 'not_found', '1970-01-01 00:00'),
+      error: 'Point not found in Points Service'
+    };
+  }
+
+  providerFromLookup = normalizeProviderName(lookup?.point?.provider_name || lookup?.point?.providerName || null);
+  pointSnapshot = lookup?.point || null;
+
+  if (providerName && providerFromLookup && providerName !== providerFromLookup) {
+    console.warn(`[RESERVE] Provider mismatch pointId=${pointId} requestedProvider=${providerName} lookupProvider=${providerFromLookup}`);
+    return {
+      success: false,
+      reservationId,
+      providerName: providerFromLookup,
+      reservation: buildReservationResponse(pointId, 'failed', '1970-01-01 00:00'),
+      error: `Provider mismatch for point '${pointId}': requested=${providerName}, expected=${providerFromLookup}`
+    };
+  }
+
+  providerName = providerFromLookup || providerName;
+  console.log(`[RESERVE] Routing reservation pointId=${pointId} provider=${providerName} duration=${duration}`);
+
+  if (!providerName || !['redPlug', 'greenPlug', 'bluePlug'].includes(providerName)) {
+    throw new Error('Unable to determine provider for point');
+  }
+
+  const adapterResult = await requestAdapterReservation(providerName, pointId, duration, userId);
+  console.log(`[RESERVE] Adapter response pointId=${pointId} provider=${providerName} success=${Boolean(adapterResult?.success)} status=${adapterResult?.reservation?.status || 'failed'}`);
+  const normalized = adapterResult?.reservation || buildReservationResponse(pointId, 'failed', '1970-01-01 00:00');
+
+  const status = String(normalized?.status || 'failed');
+  const reservationEndTime = status === 'reserved'
+    ? formatDateTimeForSpec(new Date(Date.now() + Math.min(60, duration) * 60 * 1000))
+    : '1970-01-01 00:00';
+  const successful = status === 'reserved';
+
+  await logReservation({
+    reservationId,
+    providerId: providerName === 'greenPlug' ? 2 : providerName === 'bluePlug' ? 3 : 1,
+    providerName,
+    pointId,
+    duration,
+    status: successful ? 'confirmed' : 'failed',
+    details: {
+      adapterResult,
+      reservation: normalized,
+      pointSnapshot,
+    },
+    userId
+  });
+
+  if (successful) {
+    await publishReservationEvent({
+      reservationId,
+      providerId: providerName === 'greenPlug' ? 2 : providerName === 'bluePlug' ? 3 : 1,
+      providerName,
+      pointId,
+      duration,
+      timestamp: new Date().toISOString(),
+      reservationDetails: normalized,
+      reservation_end_time: reservationEndTime,
+      reservation_status: status
+    });
+  }
+
+  return {
+    success: successful,
+    reservationId,
+    providerName,
+    reservation: buildReservationResponse(pointId, status, reservationEndTime),
+    error: successful ? null : (adapterResult?.error || 'Reservation failed')
+  };
+}
+
 /**
- * Unified Reservation API
+ * Unified Reservation API (body-based, backward-compatible)
  */
 app.post('/api/reserve', async (req, res) => {
   try {
-    const { providerName, pointId, duration, userId } = req.body;
+    const { providerName, pointId, duration, minutes, userId } = req.body;
 
-    // Validation
-    if (!providerName || !pointId || !duration) {
+    if (!pointId) {
       return res.status(400).json({
         success: false,
-        error: 'Missing required fields: providerName, pointId, duration'
+        error: 'Missing required field: pointId'
       });
     }
 
-    if (!['redPlug', 'greenPlug', 'bluePlug'].includes(providerName)) {
-      return res.status(400).json({
-        success: false,
-        error: 'Invalid provider. Must be redPlug, greenPlug, or bluePlug'
-      });
-    }
-
-    const reservationId = uuidv4();
-    console.log(`[RESERVE] Attempting reservation: ${reservationId} for ${providerName}#${pointId}`);
-
-    // Call controller
-    const result = await createReservation({
-      reservationId,
-      providerName,
+    const result = await handleReservationRequest({
       pointId,
-      duration,
-      userId
+      minutes: minutes ?? duration,
+      userId,
+      providerNameFromBody: providerName || null
     });
 
-    if (!result.success) {
-      console.error(`[RESERVE] Failed: ${result.error}`);
-      return res.status(400).json(result);
-    }
-
-    console.log(`[RESERVE] Success: ${reservationId}`);
-
-    // Get provider ID for event publishing
-    let providerId = 1;
-    if (providerName === 'greenPlug') providerId = 2;
-    if (providerName === 'bluePlug') providerId = 3;
-
-    const reservationDetails = result.data;
-    const reservationEndTime = reservationDetails?.reservationendtime || reservationDetails?.reservedUntil || reservationDetails?.reservationEnd || reservationDetails?.reservation_end_time || null;
-    const reservationStatus = reservationDetails?.status || reservationDetails?.state || reservationDetails?.currentStatus || 'reserved';
-
-    // Publish to RabbitMQ (async, non-blocking)
-    try {
-      await publishReservationEvent({
-        reservationId,
-        providerId,
-        providerName,
-        pointId,
-        duration,
-        timestamp: new Date().toISOString(),
-        reservationDetails,
-        reservation_end_time: reservationEndTime,
-        reservation_status: reservationStatus
-      });
-      console.log(`[RABBITMQ] Event published for reservation ${reservationId}`);
-    } catch (rabbitmqError) {
-      console.error(`[RABBITMQ] Publishing error (non-blocking): ${rabbitmqError.message}`);
-    }
-
-    // Return success response
-    res.status(200).json({
-      success: true,
-      reservationId,
-      providerId,
-      providerName,
-      pointId,
-      duration,
-      reservationDetails: result.data,
-      message: 'Reservation successful. Event published.'
+    return res.status(result.success ? 200 : 409).json({
+      reservationId: result.reservationId,
+      providerName: result.providerName,
+      ...result.reservation,
+      ...(result.error ? { error: result.error } : {})
     });
 
   } catch (error) {
@@ -129,6 +208,40 @@ app.post('/api/reserve', async (req, res) => {
       success: false,
       error: error.message
     });
+  }
+});
+
+/**
+ * Frontend API: POST /reserve/:id/:minutes
+ */
+app.post('/reserve/:id/:minutes', async (req, res) => {
+  try {
+    const pointId = req.params.id;
+    const minutes = Number(req.params.minutes);
+    const userId = req.body?.userId || null;
+
+    const result = await handleReservationRequest({ pointId, minutes, userId, providerNameFromBody: null });
+    return res.status(200).json(result.reservation);
+  } catch (error) {
+    console.error('[RESERVE path] Error:', error.message);
+    return res.status(500).json({ error: error.message });
+  }
+});
+
+/**
+ * Frontend API: POST /reserve/:id (defaults to 60 minutes)
+ */
+app.post('/reserve/:id', async (req, res) => {
+  try {
+    const pointId = req.params.id;
+    const minutes = Number(req.body?.minutes ?? 60);
+    const userId = req.body?.userId || null;
+
+    const result = await handleReservationRequest({ pointId, minutes, userId, providerNameFromBody: null });
+    return res.status(200).json(result.reservation);
+  } catch (error) {
+    console.error('[RESERVE path default] Error:', error.message);
+    return res.status(500).json({ error: error.message });
   }
 });
 

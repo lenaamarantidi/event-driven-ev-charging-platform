@@ -216,6 +216,7 @@ services:
       - "3001:3001"
     environment:
       PORT: 3001
+      SERVICE: central
       NODE_ENV: production
       MARIADB_HOST: mysql-central
       MARIADB_PORT: 3306
@@ -227,6 +228,9 @@ services:
       GREENPLUG_ADAPTER_URL: http://provider-adapter-greenplug:3112
       BLUEPLUG_ADAPTER_URL: http://provider-adapter-blueplug:3113
       SYNC_INGEST_TOKEN: sync-ingest-dev-token
+      ADAPTER_SYNC_TRANSPORT: broker
+      ADAPTER_SYNC_REQUEST_EXCHANGE: adapter.sync.requests
+      POINTS_RPC_EXCHANGE: points.rpc
     depends_on:
       rabbitmq:
         condition: service_healthy
@@ -252,6 +256,8 @@ services:
       DB_PASSWORD: reservation_pass
       DB_NAME: reservation_db
       RABBITMQ_URL: amqp://guest:guest@rabbitmq:5672
+      ADAPTER_SYNC_REQUEST_EXCHANGE: adapter.sync.requests
+      POINTS_RPC_EXCHANGE: points.rpc
       REDPLUG_ADAPTER_URL: http://provider-adapter-redplug:3111
       GREENPLUG_ADAPTER_URL: http://provider-adapter-greenplug:3112
       BLUEPLUG_ADAPTER_URL: http://provider-adapter-blueplug:3113
@@ -539,6 +545,8 @@ services:
     environment:
       PORT: 3111
       NODE_ENV: production
+      RABBITMQ_URL: amqp://guest:guest@rabbitmq:5672
+      ADAPTER_SYNC_REQUEST_EXCHANGE: adapter.sync.requests
       REDPLUG_API_URL: https://davinci.softlab.ntua.gr/saas26/redPlug/api
       REDPLUG_API_KEY: "sk_saas_5dec282b47047b6eced41e64"
       POINTS_SERVICE_URL: http://central-service:3001
@@ -557,6 +565,8 @@ services:
     environment:
       PORT: 3112
       NODE_ENV: production
+      RABBITMQ_URL: amqp://guest:guest@rabbitmq:5672
+      ADAPTER_SYNC_REQUEST_EXCHANGE: adapter.sync.requests
       GREENPLUG_API_URL: https://davinci.softlab.ntua.gr/saas26/greenPlug/api
       GREENPLUG_API_KEY: "sk_saas_5dec282b47047b6eced41e64"
       POINTS_SERVICE_URL: http://central-service:3001
@@ -575,6 +585,8 @@ services:
     environment:
       PORT: 3113
       NODE_ENV: production
+      RABBITMQ_URL: amqp://guest:guest@rabbitmq:5672
+      ADAPTER_SYNC_REQUEST_EXCHANGE: adapter.sync.requests
       BLUEPLUG_API_URL: https://davinci.softlab.ntua.gr/saas26/bluePlug/api
       BLUEPLUG_API_KEY: "sk_saas_5dec282b47047b6eced41e64"
       POINTS_SERVICE_URL: http://central-service:3001
