@@ -15,7 +15,7 @@ async def analytics_root(request: Request):
     """Proxy analytics root requests to Analytics Service."""
     return await proxy_service.forward_request(
         settings.ANALYTICS_SERVICE_URL,
-        "/api/analytics",
+        "/analytics",
         request,
         request.method,
     )
@@ -24,7 +24,7 @@ async def analytics_root(request: Request):
 @router.api_route("/{path:path}", methods=METHODS)
 async def analytics_proxy(path: str, request: Request):
     """Proxy all analytics requests to Analytics Service."""
-    target_path = f"/api/analytics/{path}" if path else "/api/analytics"
+    target_path = f"/analytics/{path}" if path else "/analytics"
     return await proxy_service.forward_request(
         settings.ANALYTICS_SERVICE_URL,
         target_path,
