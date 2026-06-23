@@ -6,6 +6,7 @@ const axios = require('axios');
 const mysql = require('mysql2/promise');
 const bcrypt = require('bcryptjs');
 const { v4: uuidv4 } = require('uuid');
+const { connectWithRetry, publishUserRegistered, closeConnection } = require('./rabbitmq');
 
 const app = express();
 app.use(express.json());
@@ -268,6 +269,9 @@ app.post('/auth/register', async (req, res) => {
     const refreshToken = generateRefreshToken();
     await saveRefreshToken(user.user_id, refreshToken);
 
+    // Publish user_registered event to Analytics Service
+    await publishUserRegistered(user.user_id.toString(), new Date().toISOString());
+
     return res.status(201).json({
       userId: user.user_id.toString(),
       email: user.email,
@@ -511,7 +515,14 @@ app.use((err, req, res, next) => {
 
 if (require.main === module) {
   initializeDatabase()
-    .then(() => {
+    .then(async () => {
+      // Try to connect to RabbitMQ, but don't fail if it's unavailable
+      try {
+        await connectWithRetry(5, 2000);
+      } catch (err) {
+        console.warn('Warning: Could not connect to RabbitMQ, user registration events will not be published:', err.message);
+      }
+
       app.listen(PORT, () => {
         console.log(`Auth Service listening on port ${PORT}`);
         console.log(`MariaDB connected: ${DB_HOST}:${DB_PORT}/${DB_NAME}`);
@@ -523,5 +534,18 @@ if (require.main === module) {
       process.exit(1);
     });
 }
+
+// Graceful shutdown
+process.on('SIGTERM', async () => {
+  console.log('SIGTERM received, closing RabbitMQ connection...');
+  await closeConnection();
+  process.exit(0);
+});
+
+process.on('SIGINT', async () => {
+  console.log('SIGINT received, closing RabbitMQ connection...');
+  await closeConnection();
+  process.exit(0);
+});
 
 module.exports = app;

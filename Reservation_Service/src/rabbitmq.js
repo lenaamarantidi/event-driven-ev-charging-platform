@@ -10,10 +10,13 @@ let connection;
 let channel;
 
 const RABBITMQ_URL = process.env.RABBITMQ_URL || 'amqp://localhost';
+const RPC_TIMEOUT_MS = Number(process.env.RPC_TIMEOUT_MS || 12000);
 
 const EXCHANGES = {
   // Note: billing and per-reservation analytics updates are handled elsewhere / removed by design.
-  reservation: 'reservation_exchange'
+  reservation: 'reservation_exchange',
+  adapter: process.env.ADAPTER_SYNC_REQUEST_EXCHANGE || 'adapter.sync.requests',
+  pointsRpc: process.env.POINTS_RPC_EXCHANGE || 'points.rpc'
 };
 
 
@@ -29,6 +32,8 @@ async function connectWithRetry(attempt = 1, maxAttempts = 5) {
 
     // Declare exchanges
     await channel.assertExchange(EXCHANGES.reservation, 'topic', { durable: true });
+    await channel.assertExchange(EXCHANGES.adapter, 'topic', { durable: true });
+    await channel.assertExchange(EXCHANGES.pointsRpc, 'topic', { durable: true });
 
 
     // Setup dead letter exchanges (harmless if not used)
@@ -52,6 +57,66 @@ async function connectWithRetry(attempt = 1, maxAttempts = 5) {
 
     throw new Error(`Failed to connect to RabbitMQ after ${maxAttempts} attempts`);
   }
+}
+
+function makeCorrelationId(prefix = 'rpc') {
+  return `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
+}
+
+async function rpcRequest(exchange, routingKey, payload, timeoutMs = RPC_TIMEOUT_MS) {
+  if (!channel) {
+    throw new Error('RabbitMQ channel not initialized');
+  }
+
+  const correlationId = makeCorrelationId('rpc');
+  const reply = await channel.assertQueue('', { exclusive: true, autoDelete: true });
+
+  const responsePromise = new Promise((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error(`RPC timeout for routingKey=${routingKey}`)), timeoutMs);
+
+    channel.consume(
+      reply.queue,
+      (msg) => {
+        if (!msg) return;
+        if (msg.properties.correlationId !== correlationId) return;
+
+        clearTimeout(timer);
+        try {
+          resolve(JSON.parse(msg.content.toString('utf8')));
+        } catch (err) {
+          reject(err);
+        }
+      },
+      { noAck: true }
+    ).catch(reject);
+  });
+
+  channel.publish(
+    exchange,
+    routingKey,
+    Buffer.from(JSON.stringify(payload || {})),
+    {
+      contentType: 'application/json',
+      correlationId,
+      replyTo: reply.queue,
+      messageId: correlationId,
+      persistent: false,
+    }
+  );
+
+  return responsePromise;
+}
+
+async function requestPointLookup(pointId) {
+  return rpcRequest(EXCHANGES.pointsRpc, 'points.lookup.request', { pointId });
+}
+
+async function requestAdapterReservation(providerName, pointId, minutes, userId) {
+  return rpcRequest(
+    EXCHANGES.adapter,
+    `adapter.${providerName}.reserve`,
+    { providerName, pointId, minutes, userId }
+  );
 }
 
 /**
@@ -194,10 +259,62 @@ async function publishAnalyticsDaily(payload) {
   }
 }
 
+/**
+ * Publish reservation_completed event to Analytics Service
+ * This event contains details about both successful and failed reservations
+ */
+async function publishReservationCompleted(eventData) {
+  try {
+    if (!channel) {
+      throw new Error('RabbitMQ channel not initialized');
+    }
+
+    const {
+      reservationId,
+      providerId,
+      providerName,
+      userId,
+      pointId,
+      status, // 'success' or 'failed'
+      timestamp
+    } = eventData;
+
+    const message = {
+      reservationId,
+      providerId,
+      providerName,
+      userId,
+      pointId,
+      status,
+      timestamp
+    };
+
+    // Declare exchange if not exists
+    const SAAS_EVENTS_EXCHANGE = 'saas_events';
+    await channel.assertExchange(SAAS_EVENTS_EXCHANGE, 'topic', { durable: true });
+
+    const messageBuffer = Buffer.from(JSON.stringify(message));
+    const published = channel.publish(SAAS_EVENTS_EXCHANGE, 'reservation.completed', messageBuffer);
+
+    if (!published) {
+      console.warn('[RabbitMQ] Reservation completed event may not have been queued (backpressure)');
+    }
+
+    console.log(`[RabbitMQ] Event published: reservation.completed (${status}) for reservation ${reservationId}`);
+    return true;
+  } catch (error) {
+    console.error('[RabbitMQ] publishReservationCompleted error:', error.message);
+    throw error;
+  }
+}
+
 module.exports = {
   connectWithRetry,
   publishReservationEvent,
+  publishReservationCompleted,
   publishAnalyticsDaily,
+  requestPointLookup,
+  requestAdapterReservation,
   getChannel,
   closeConnection
 };

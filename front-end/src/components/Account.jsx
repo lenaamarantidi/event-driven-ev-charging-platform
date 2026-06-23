@@ -2,8 +2,7 @@ import { useState, useEffect } from "react";
 import axios from 'axios';
 import { BASE_URL } from '../config';
 
-const Account = ({ savedCard, setSavedCard }) => {
-    const [confirmDelete, setConfirmDelete] = useState(false);
+const Account = () => {
     const [reservations, setReservations] = useState([]);
     const [loading, setLoading] = useState(true);
     const [cancelingId, setCancelingId] = useState(null);
@@ -59,32 +58,6 @@ const Account = ({ savedCard, setSavedCard }) => {
             ) : (
                 <div className="alert alert-info" style={{ backgroundColor: '#2d1f47', color: '#f5f1ff', borderColor: '#5d4a80' }}>Logged in (Token active)</div>
             )}
-            <hr style={{ borderColor: '#5d4a80' }} />
-            <h4 style={{ color: '#f5f1ff' }}>💳 Saved Payment Methods</h4>
-            
-            {savedCard ? (
-                <div className="card p-3 mt-3" style={{maxWidth: '400px', backgroundColor: '#2d1f47', borderColor: '#5d4a80', color: '#f5f1ff'}}>
-                    <h5 style={{ color: '#ffd700' }}>Card ending in •••• {savedCard.number.slice(-4)}</h5>
-                    <p className="mb-1">Expires: {savedCard.exp}</p>
-                    
-                    {!confirmDelete ? (
-                        <button className="btn btn-outline-danger mt-2" onClick={() => setConfirmDelete(true)}>
-                            🗑️ Remove Card
-                        </button>
-                    ) : (
-                        <div className="mt-2 border p-2 rounded border-danger">
-                            <p className="text-danger mb-2">⚠️ Are you sure?</p>
-                            <div className="d-flex gap-2">
-                                <button className="btn btn-danger btn-sm" onClick={() => { setSavedCard(null); setConfirmDelete(false); }}>Yes, Remove</button>
-                                <button className="btn btn-secondary btn-sm" onClick={() => setConfirmDelete(false)}>Cancel</button>
-                            </div>
-                        </div>
-                    )}
-                </div>
-            ) : (
-                <div className="alert alert-warning mt-3" style={{ backgroundColor: '#2d1f47', color: '#f5f1ff', borderColor: '#5d4a80' }}>No saved cards found.</div>
-            )}
-            
             <hr className="my-4" style={{ borderColor: '#5d4a80' }} />
             
             {/* My Reservations Section */}

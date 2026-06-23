@@ -1,8 +1,6 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import axios from 'axios';
-import { BASE_URL, SERVICES } from '../config';
-import { pointsAPI, reservationAPI } from '../utils/apiClient';
-import ProviderDataMapper from '../utils/providerDataMapper';
+import { pointsAPI } from '../utils/apiClient';
 import MapView from '../components/MapView';
 import InfoPanel from '../components/InfoPanel';
 import Sidebar from '../components/Sidebar';
@@ -19,42 +17,67 @@ const calculateDistance = (lat1, lon1, lat2, lon2) => {
   return R * c;
 }
 
-const normalizePoints = (locations, userLocation) => {
-  if (!Array.isArray(locations)) return [];
+const normalizePoint = (point, userLocation) => {
+  const pointid = String(point.pointid || point.point_id || point.pointId || point.id || point.unifiedPointId);
+  const providerName = point.providerName || point.provider_name || 'Unknown';
+  const status = point.status || point.currentStatus || 'offline';
+  const cap = Number(point.cap ?? point.capacity_kw ?? point.capacityKw ?? point.kilowatts ?? point.power ?? 22);
+  const kwhprice = Number(point.kwhprice ?? point.kwh_price ?? point.kwhPrice ?? point.pricePerKwh ?? 0.45);
+  const connector = point.connector || point.connector_type || point.connectorType || null;
 
-  return locations.map((location) => {
-    const lat = parseFloat(location.latitude);
-    const lon = parseFloat(location.longitude);
-    const distance = location.distance_km || calculateDistance(userLocation[0], userLocation[1], lat, lon);
-    
-    const connectorTypesSet = new Set();
-    let firstOutletData = { kwhprice: 0.45, cap: 0 };
-    
-    if (Array.isArray(location.outlets) && location.outlets.length > 0) {
-      location.outlets.forEach(outlet => {
-        if (outlet.connector_type) {
-          connectorTypesSet.add(outlet.connector_type);
-        }
-      });
-      firstOutletData = {
-        kwhprice: location.outlets[0].kwhprice || 0.45,
-        cap: location.outlets[0].kilowatts || 0
-      };
-    }
-    
-    return {
-      pointid: String(location.id),
-      lat,
-      lon,
-      name: location.name || 'Unknown Location',
-      address: location.address || '',
-      connector_types: Array.from(connectorTypesSet),
-      kwhprice: firstOutletData.kwhprice,
-      cap: firstOutletData.cap,
-      distance,
-      outlets: location.outlets || []
-    };
-  });
+  let lat = Number(point.lat ?? point.latitude ?? point.coordinates?.latitude ?? 37.9755);
+  let lon = Number(point.lon ?? point.longitude ?? point.coordinates?.longitude ?? 23.7348);
+
+  if (lat < 30 && lon > 30) {
+    [lat, lon] = [lon, lat];
+  }
+
+  // Map connector code to semantic name
+  const connectorMap = {
+    '3': 'Type 3',
+    '7': 'CHAdeMO',
+    '20': 'Type 2',
+    '24': 'CCS2',
+    'null': 'Other'
+  };
+  
+  const connectorTypesSet = new Set();
+  if (connector) {
+    const semanticName = connectorMap[connector] || 'Other';
+    connectorTypesSet.add(semanticName);
+  } else {
+    connectorTypesSet.add('Other');
+  }
+
+  const outlets = Array.isArray(point.outlets) && point.outlets.length > 0
+    ? point.outlets
+    : Array.isArray(point.connectors) && point.connectors.length > 0
+      ? point.connectors
+      : [{
+          outlet_id: pointid,
+          connector_type: connector,
+          kilowatts: cap,
+          status,
+          kwhprice
+        }];
+
+  return {
+    pointid,
+    lat,
+    lon,
+    name: point.location_name || point.locationName || point.name || `${providerName} Station ${pointid}`,
+    address: point.address || '',
+    connector_types: Array.from(connectorTypesSet),
+    kwhprice,
+    cap,
+    distance: calculateDistance(userLocation[0], userLocation[1], lat, lon),
+    outlets,
+    status,
+    currentStatus: status,
+    providerName,
+    reservationEndTime: point.reservationEndTime || point.reservation_end_time || point.reservationendtime,
+    charger_type: cap <= 22 ? 'AC' : 'DC'
+  };
 };
 
 const EVUserMap = ({ setToken }) => {
@@ -63,10 +86,10 @@ const EVUserMap = ({ setToken }) => {
   const [selectedCharger, setSelectedCharger] = useState(null);
   const [userLocation, setUserLocation] = useState([37.9755, 23.7348]); 
   const [searchText, setSearchText] = useState("");
-  const [savedCard, setSavedCard] = useState(null);
   const [gpsError, setGpsError] = useState(null);
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [infoPanelOpen, setInfoPanelOpen] = useState(false);
+  const userLocationRef = useRef(userLocation);
   const [windowWidth, setWindowWidth] = useState(() => {
     return typeof window !== 'undefined' ? window.innerWidth : 1024;
   });
@@ -78,7 +101,8 @@ const EVUserMap = ({ setToken }) => {
     powerMin: 0,
     powerMax: 350,
     avail: [],
-    type: []
+    type: [],
+    connectorTypes: []
   });
 
   useEffect(() => {
@@ -108,6 +132,28 @@ const EVUserMap = ({ setToken }) => {
   }, []);
 
   const isMobile = windowWidth < 768;
+
+  useEffect(() => { userLocationRef.current = userLocation; }, [userLocation]);
+
+  // SSE: real-time point status updates from Points Service
+  useEffect(() => {
+    const eventSource = new EventSource('/api/points/events');
+
+    eventSource.onmessage = (event) => {
+      try {
+        const rawPoint = JSON.parse(event.data);
+        const normalized = normalizePoint(rawPoint, userLocationRef.current);
+        setChargers((prev) => prev.map((c) =>
+          String(c.pointid) === String(normalized.pointid) ? normalized : c
+        ));
+        setSelectedCharger((current) =>
+          current && String(current.pointid) === String(normalized.pointid) ? normalized : current
+        );
+      } catch (_) {}
+    };
+
+    return () => eventSource.close();
+  }, []);
 
   // GPS
   useEffect(() => {
@@ -145,77 +191,65 @@ const EVUserMap = ({ setToken }) => {
   useEffect(() => {
     const fetchData = async () => {
       try {
-        // Fetch all charging points from all providers via Points Service /api/points
-        const result = await pointsAPI.getAll();
+        const params = {
+          lat: userLocation[0],
+          lon: userLocation[1],
+          costMin: filters.costMin,
+          costMax: filters.costMax,
+          powerMin: filters.powerMin,
+          powerMax: filters.powerMax
+        };
+
+        if (filters.dist < 100) {
+          params.radius = filters.dist;
+        }
+
+        if (filters.avail && filters.avail.length > 0) {
+          params.avail = filters.avail.join(',');
+        }
+
+        if (filters.connectorTypes && filters.connectorTypes.length > 0) {
+          params.connectorType = filters.connectorTypes.join(',');
+        }
+
+        if (filters.type && filters.type.length > 0) {
+          params.type = filters.type.join(',');
+        }
+
+        // Fetch backend-filtered charging points
+        const result = await pointsAPI.getAll(params);
 
         if (result.success && result.data) {
           const points = result.data.points || result.data || [];
 
-          // Normalize provider data to unified format
-          // Points_Service returns: point_id, provider_name, lon, lat, status, kilowatts, kwh_price, address, etc.
-          const normalized = points.map((point) => ({
-            pointid: String(point.unifiedPointId || point.pointId || point.point_id || point.id || Math.random()),
-            lat: point.lat || point.coordinates?.latitude || 37.9755,
-            lon: point.lon || point.coordinates?.longitude || 23.7348,
-            name: point.name || `${point.provider_name || point.providerName || 'Unknown'} Station ${point.point_id || point.pointId}`,
-            address: point.address || '',
-            connector_types: point.connector_types || ['Type 2'],
-            kwhprice: point.pricePerKwh || point.kwh_price || point.kwhPrice || 0.45,
-            cap: point.power || point.kilowatts || point.cap || 22,
-            distance: calculateDistance(userLocation[0], userLocation[1],
-                                       point.lat || 37.9755,
-                                       point.lon || 23.7348),
-            outlets: point.connectors || point.outlets || [],
-            currentStatus: point.currentStatus || point.status,
-            providerName: point.provider_name || point.providerName,
-            reservationEndTime: point.reservationEndTime
-          })).map((location) => ({
-            ...location,
-            charger_type: (location.cap || 0) <= 22 ? 'AC' : 'DC'
-          }));
+          const normalized = points.map((point) => normalizePoint(point, userLocation));
 
-          setChargers(normalized);
+          const sorted = [...normalized].sort((a, b) => a.distance - b.distance);
+
+          setChargers(sorted);
+          setFilteredChargers(sorted);
         } else {
           console.warn('Failed to fetch charging points:', result.error);
           setChargers([]);
+          setFilteredChargers([]);
         }
       } catch (err) {
         console.error('Error fetching from Points API:', err);
         setChargers([]);
+        setFilteredChargers([]);
       }
     };
     fetchData();
-  }, [userLocation]);
+  }, [userLocation, filters]);
 
-  // Apply Filters 
-  useEffect(() => {
-    let result = chargers;
-    
-    if (filters.avail.length > 0) {
-      result = result.filter(location => {
-        const outlets = Array.isArray(location.outlets) ? location.outlets : [];
-        return filters.avail.some(status => {
-          if (status === 'available') return outlets.some(o => o.status === 'available');
-          if (status === 'occupied') return outlets.some(o => o.status === 'charging' || o.status === 'reserved');
-          if (status === 'unavailable') return outlets.some(o => o.status === 'offline' || o.status === 'malfunction');
-          if (status === 'booked_by_me') return outlets.some(o => o.status === 'booked_by_me');
-          return false;
-        });
-      });
-    }
-
-    result = result.filter(l => {
-      const price = l.kwhprice || 0;
-      const kw = l.cap || 0;
-      return price >= filters.costMin && price <= filters.costMax && kw >= filters.powerMin && kw <= filters.powerMax;
-    });
-
-    if (filters.type.length > 0) {
-      result = result.filter(l => filters.type.includes(l.charger_type));
-    }
-
-    setFilteredChargers(result.sort((a, b) => a.distance - b.distance));
-  }, [chargers, filters]);
+  const updatePointInState = (updatedPoint) => {
+    setChargers((prev) => prev.map((charger) => (
+      String(charger.pointid) === String(updatedPoint.pointid) ? updatedPoint : charger
+    )));
+    setSelectedCharger((current) => (
+      current && String(current.pointid) === String(updatedPoint.pointid) ? updatedPoint : current
+    ));
+  };
 
   const handleLogout = () => {
     localStorage.removeItem('token');
@@ -275,14 +309,22 @@ const EVUserMap = ({ setToken }) => {
               <div className="p-2">
                 <button className="btn btn-close" onClick={() => setInfoPanelOpen(false)}></button>
               </div>
-              <InfoPanel charger={selectedCharger} savedCard={savedCard} setSavedCard={setSavedCard} filters={filters} onClose={() => setInfoPanelOpen(false)} />
+              <InfoPanel
+                charger={selectedCharger}
+                filters={filters}
+                onClose={() => setInfoPanelOpen(false)}
+              />
             </div>
           )}
 
           {/* Desktop Info Panel */}
           {!isMobile && selectedCharger && (
             <div style={{ width: '350px', borderLeft: '1px solid #dee2e6', overflowY: 'auto' }}>
-              <InfoPanel charger={selectedCharger} savedCard={savedCard} setSavedCard={setSavedCard} filters={filters} onClose={() => setSelectedCharger(null)} />
+              <InfoPanel
+                charger={selectedCharger}
+                filters={filters}
+                onClose={() => setSelectedCharger(null)}
+              />
             </div>
           )}
         </div>

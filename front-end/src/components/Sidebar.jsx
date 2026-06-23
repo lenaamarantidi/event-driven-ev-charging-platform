@@ -72,7 +72,7 @@ const Sidebar = ({ setFilters, onLogout, onFiltersApplied }) => {
         <div className="mb-3">
           <label className="fw-bold d-block mb-1">Connector Types</label>
           <div className="card p-2 bg-secondary bg-opacity-25">
-            {['Type 2', 'CCS1', 'CCS2', 'CHAdeMO', 'Wall (Euro)', 'J-1772', 'Type 3', 'Type 3A', 'Caravan Mains Socket', 'Three Phase EU', 'Other'].map(connector => (
+            {['Type 2', 'Type 3', 'CHAdeMO', 'CCS2', 'Other'].map(connector => (
               <div className="form-check" key={connector}>
                 <input 
                   className="form-check-input" 
@@ -125,8 +125,7 @@ const Sidebar = ({ setFilters, onLogout, onFiltersApplied }) => {
             {[
               { value: 'available', label: 'Available', color: '#4CAF50' },
               { value: 'occupied', label: 'Occupied', color: '#F44336' },
-              { value: 'unavailable', label: 'Unavailable', color: '#9E9E9E' },
-              { value: 'booked_by_me', label: 'Booked by me', color: '#9C27B0' }
+              { value: 'unavailable', label: 'Unavailable', color: '#9E9E9E' }
             ].map(({ value, label, color }) => (
               <div className="form-check d-flex align-items-center" key={value}>
                 <input 
