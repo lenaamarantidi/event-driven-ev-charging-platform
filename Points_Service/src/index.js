@@ -102,10 +102,29 @@ function scheduleReservationExpiry(pointId, reservationEndTime) {
           const s = String(service).toLowerCase();
           
           let plugKey;
-          if (s.includes('green')) plugKey = 'greenPlug';
-          else if (s.includes('red')) plugKey = 'redPlug';
-          else if (s.includes('blue')) plugKey = 'bluePlug';
-          else throw new Error('Unknown service');
+          let providerFromDb = null;
+          
+          // For central service, we need to get the provider from the DB first
+          if (s.includes('central')) {
+            const [dbRows] = await pointsMysql.query(
+              'SELECT provider_name FROM points WHERE point_id = ?',
+              [pointId]
+            );
+            if (dbRows.length > 0) {
+              providerFromDb = dbRows[0].provider_name || '';
+              if (providerFromDb.includes('green')) plugKey = 'greenPlug';
+              else if (providerFromDb.includes('red')) plugKey = 'redPlug';
+              else if (providerFromDb.includes('blue')) plugKey = 'bluePlug';
+            }
+          } else {
+            if (s.includes('green')) plugKey = 'greenPlug';
+            else if (s.includes('red')) plugKey = 'redPlug';
+            else if (s.includes('blue')) plugKey = 'bluePlug';
+          }
+          
+          if (!plugKey) {
+            throw new Error(`Unknown service or could not determine provider for point ${pointId}`);
+          }
 
           const config = PROVIDER_MAP[plugKey];
           const url = buildProviderUrl(plugKey, "detailPath", pointId);
@@ -185,8 +204,8 @@ function scheduleReservationExpiry(pointId, reservationEndTime) {
                     const protocol = 'http';
                     const serviceHost = 'host.docker.internal';
                     const centralUrl = `${protocol}://${serviceHost}:${centralPort}${DB_POINT_UPDATE.replace(':pointId', pointId)}`;
-                    console.log(`[scheduleReservationExpiry] Also updating central DB at ${centralUrl}`);
-                    await axios.put(centralUrl, { status: currentStatus });
+                    console.log(`[scheduleReservationExpiry] Also updating central DB at ${centralUrl} with payload:`, { status: currentStatus, reservation_end_time: null });
+                    await axios.put(centralUrl, { status: currentStatus, reservation_end_time: null });
                   }
                 } catch (err) {
                   console.error(`[scheduleReservationExpiry] Failed to update central DB:`, err.message);
@@ -207,8 +226,8 @@ function scheduleReservationExpiry(pointId, reservationEndTime) {
                       const protocol = 'http';
                       const serviceHost = 'host.docker.internal';
                       const targetUrl = `${protocol}://${serviceHost}:${targetPort}${DB_POINT_UPDATE.replace(':pointId', pointId)}`;
-                      console.log(`[scheduleReservationExpiry] Central service updating ${targetPlug} DB at ${targetUrl}`);
-                      await axios.put(targetUrl, { status: currentStatus });
+                      console.log(`[scheduleReservationExpiry] Central service updating ${targetPlug} DB at ${targetUrl} with payload:`, { status: currentStatus, reservation_end_time: null });
+                      await axios.put(targetUrl, { status: currentStatus, reservation_end_time: null });
                     } catch (err) {
                       console.error(`[scheduleReservationExpiry] Failed to update ${targetPlug} DB:`, err.message);
                     }
@@ -683,6 +702,7 @@ app.put(DB_POINT_UPDATE, async (req, res) => {
   try {
     const { pointId } = req.params;
     const pointData = req.body;
+    console.log(`[PUT /db/points/:pointId] Received update for point ${pointId}:`, pointData);
 
     // Check if point exists
     const [existingRows] = await pointsMysql.query(
@@ -943,8 +963,8 @@ const { pointId } = req.params;
           const protocol = req.protocol;
           const serviceHost = 'host.docker.internal';
           const centralUrl = `${protocol}://${serviceHost}:${centralPort}${DB_POINT_UPDATE.replace(':pointId', pointId)}`;
-          console.log(`[API_POINTS_RESERVE] Also updating central DB at ${centralUrl}`);
-          const centralResponse = await axios.put(centralUrl, { status: newStatus });
+          console.log(`[API_POINTS_RESERVE] Also updating central DB at ${centralUrl} with payload:`, { status: newStatus, reservation_end_time: reservationEndTime });
+          const centralResponse = await axios.put(centralUrl, { status: newStatus, reservation_end_time: reservationEndTime });
           centralUpdateResult = {
             service: 'central',
             updated: true,
@@ -982,8 +1002,8 @@ const { pointId } = req.params;
             const protocol = req.protocol;
             const serviceHost = 'host.docker.internal';
             const targetUrl = `${protocol}://${serviceHost}:${targetPort}${DB_POINT_UPDATE.replace(':pointId', pointId)}`;
-            console.log(`[API_POINTS_RESERVE] Central service updating ${targetPlug} DB at ${targetUrl}`);
-            const targetResponse = await axios.put(targetUrl, { status: newStatus });
+            console.log(`[API_POINTS_RESERVE] Central service updating ${targetPlug} DB at ${targetUrl} with payload:`, { status: newStatus, reservation_end_time: reservationEndTime });
+            const targetResponse = await axios.put(targetUrl, { status: newStatus, reservation_end_time: reservationEndTime });
             targetServiceUpdateResult = {
               service: targetPlug,
               updated: true,
