@@ -118,19 +118,13 @@ export const providerAPI = {
  */
 export const analyticsAPI = {
   /**
-   * GET /api/analytics/provider/:providerId?period=monthly&from=DATE&to=DATE
-   * Λήψη analytics για συγκεκριμένο provider
+   * GET /api/analytics/providers/:providerId
+   * Provider KPI metrics from Analytics Service.
    */
-  getProviderAnalytics: async (providerId, options = {}) => {
+  getProviderAnalytics: async (providerId) => {
     try {
       const api = createApiInstance(SERVICES.analytics);
-      const params = new URLSearchParams({
-        period: options.period || 'monthly',
-        ...(options.from && { from: options.from }),
-        ...(options.to && { to: options.to })
-      }).toString();
-      
-      const response = await api.get(`/analytics/provider/${providerId}?${params}`, getAuthHeaders());
+      const response = await api.get(`/providers/${providerId}`, getAuthHeaders());
       return {
         success: true,
         data: response.data
@@ -145,13 +139,13 @@ export const analyticsAPI = {
   },
 
   /**
-   * GET /api/analytics/provider/:providerId/daily
-   * Λήψη ημερήσιων analytics
+   * GET /api/analytics/providers/:providerId/timeseries
+   * Provider six-month reservation and user timeseries.
    */
-  getDailyAnalytics: async (providerId) => {
+  getProviderTimeseries: async (providerId) => {
     try {
       const api = createApiInstance(SERVICES.analytics);
-      const response = await api.get(`/analytics/provider/${providerId}/daily`, getAuthHeaders());
+      const response = await api.get(`/providers/${providerId}/timeseries`, getAuthHeaders());
       return {
         success: true,
         data: response.data
@@ -160,14 +154,21 @@ export const analyticsAPI = {
       return {
         success: false,
         error: error.response?.data?.message || error.message,
-        data: []
+        data: {}
       };
     }
   },
 
   /**
+   * Legacy alias kept for older screens.
+   */
+  getDailyAnalytics: async (providerId) => {
+    return analyticsAPI.getProviderTimeseries(providerId);
+  },
+
+  /**
    * UC08: Export provider logs
-   * GET /api/analytics/provider/:providerId/export
+   * GET /api/analytics/providers/:providerId/export
    * Downloads activity logs as CSV or JSON
    */
   exportLogs: async (providerId, format = 'csv', startDate, endDate) => {
@@ -180,7 +181,7 @@ export const analyticsAPI = {
       }).toString();
       
       const response = await api.get(
-        `/analytics/provider/${providerId}/export?${params}`,
+        `/providers/${providerId}/export?${params}`,
         {
           ...getAuthHeaders(),
           responseType: format === 'csv' ? 'blob' : 'json'
@@ -207,7 +208,7 @@ export const analyticsAPI = {
     try {
       const api = createApiInstance(SERVICES.analytics);
       const response = await api.post(
-        `/analytics/provider/${providerId}/request-invoice`,
+        `/providers/${providerId}/request-invoice`,
         {
           period,
           ...(startDate && { startDate }),
@@ -234,7 +235,49 @@ export const analyticsAPI = {
   getGlobalAnalytics: async (period = 'monthly') => {
     try {
       const api = createApiInstance(SERVICES.analytics);
-      const response = await api.get(`/analytics/global?period=${period}`, getAuthHeaders());
+      const response = await api.get(`/global?period=${period}`, getAuthHeaders());
+      return {
+        success: true,
+        data: response.data
+      };
+    } catch (error) {
+      return {
+        success: false,
+        error: error.response?.data?.message || error.message,
+        data: {}
+      };
+    }
+  },
+
+  /**
+   * GET /api/analytics/global/timeseries
+   * Operator six-month analytics.
+   */
+  getGlobalTimeseries: async () => {
+    try {
+      const api = createApiInstance(SERVICES.analytics);
+      const response = await api.get('/global/timeseries', getAuthHeaders());
+      return {
+        success: true,
+        data: response.data
+      };
+    } catch (error) {
+      return {
+        success: false,
+        error: error.response?.data?.message || error.message,
+        data: {}
+      };
+    }
+  },
+
+  /**
+   * GET /api/analytics/global/rankings
+   * Operator provider rankings.
+   */
+  getGlobalRankings: async () => {
+    try {
+      const api = createApiInstance(SERVICES.analytics);
+      const response = await api.get('/global/rankings', getAuthHeaders());
       return {
         success: true,
         data: response.data
