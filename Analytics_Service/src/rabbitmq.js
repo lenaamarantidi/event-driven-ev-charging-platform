@@ -1,9 +1,11 @@
 /**
- * RabbitMQ Configuration and Consumer Setup
+ * RabbitMQ Configuration and Event Consumer
  * Analytics_Service
  *
  * Consumes events:
- * - analytics.reservations.daily (published by Reservation_Service)
+ * - user_registered (from Auth Service)
+ * - provider_registered (from Provider Management Service)
+ * - reservation_completed (from Reservation Service)
  */
 
 const amqp = require('amqplib');
@@ -13,9 +15,7 @@ let connection = null;
 let channel = null;
 
 const RABBITMQ_URL = process.env.RABBITMQ_URL || 'amqp://localhost';
-const EXCHANGE_NAME = 'analytics_exchange';
-const QUEUE_NAME = 'analytics_reservation_queue';
-const QUEUE_DEADLETTER = 'analytics_dlq';
+const EXCHANGE_NAME = 'saas_events';
 
 /**
  * Connect to RabbitMQ and setup consumer
@@ -24,135 +24,202 @@ async function connectRabbitMQ() {
   connection = await amqp.connect(RABBITMQ_URL);
   channel = await connection.createChannel();
 
-  // Declare topic exchange for analytics events
+  // Declare topic exchange for all events
   await channel.assertExchange(EXCHANGE_NAME, 'topic', { durable: true });
 
-  // Declare main queue
-  await channel.assertQueue(QUEUE_NAME, {
-    durable: true,
-    arguments: {
-      'x-dead-letter-exchange': EXCHANGE_NAME,
-      'x-dead-letter-routing-key': 'analytics.error'
-    }
-  });
-
-  // Bind queue to only the reservation daily analytics event
-  await channel.bindQueue(QUEUE_NAME, EXCHANGE_NAME, 'analytics.reservations.daily');
-
-  // Setup dead-letter queue
-  await channel.assertQueue(QUEUE_DEADLETTER, { durable: true });
-  await channel.bindQueue(QUEUE_DEADLETTER, EXCHANGE_NAME, 'analytics.error');
-
-  // Set QoS to process one message at a time
-  await channel.prefetch(1);
+  // Setup queues for different event types
+  await setupUserRegistrationQueue();
+  await setupProviderRegistrationQueue();
+  await setupReservationCompletedQueue();
 
   console.log('Connected to RabbitMQ - Analytics Service');
   return channel;
 }
 
-function toISOOrNull(value) {
-  if (!value) return null;
-  const d = new Date(value);
-  if (Number.isNaN(d.getTime())) return null;
-  return d.toISOString();
+/**
+ * Setup queue for user_registered events
+ */
+async function setupUserRegistrationQueue() {
+  const QUEUE_NAME = 'analytics_user_registered';
+  
+  await channel.assertQueue(QUEUE_NAME, { durable: true });
+  await channel.bindQueue(QUEUE_NAME, EXCHANGE_NAME, 'user.registered');
+  await channel.prefetch(1);
+  
+  console.log(`User registration queue "${QUEUE_NAME}" ready`);
+  await channel.consume(QUEUE_NAME, (msg) => handleUserRegisteredEvent(msg));
 }
 
 /**
- * Handle incoming analytics events
+ * Setup queue for provider_registered events
  */
-async function handleAnalyticsEvent(msg) {
+async function setupProviderRegistrationQueue() {
+  const QUEUE_NAME = 'analytics_provider_registered';
+  
+  await channel.assertQueue(QUEUE_NAME, { durable: true });
+  await channel.bindQueue(QUEUE_NAME, EXCHANGE_NAME, 'provider.registered');
+  await channel.prefetch(1);
+  
+  console.log(`Provider registration queue "${QUEUE_NAME}" ready`);
+  await channel.consume(QUEUE_NAME, (msg) => handleProviderRegisteredEvent(msg));
+}
+
+/**
+ * Setup queue for reservation_completed events
+ */
+async function setupReservationCompletedQueue() {
+  const QUEUE_NAME = 'analytics_reservation_completed';
+  
+  await channel.assertQueue(QUEUE_NAME, { durable: true });
+  await channel.bindQueue(QUEUE_NAME, EXCHANGE_NAME, 'reservation.completed');
+  await channel.prefetch(1);
+  
+  console.log(`Reservation completed queue "${QUEUE_NAME}" ready`);
+  await channel.consume(QUEUE_NAME, (msg) => handleReservationCompletedEvent(msg));
+}
+
+/**
+ * Handle user_registered event
+ */
+async function handleUserRegisteredEvent(msg) {
   if (!msg) return;
 
   try {
-    const content = msg.content ? msg.content.toString('utf8') : '';
+    const content = msg.content.toString('utf8');
+    const event = JSON.parse(content);
+    
+    const { userId, timestamp } = event;
 
-    let event;
-    try {
-      event = JSON.parse(content);
-    } catch (parseErr) {
-      console.error('Invalid JSON received by Analytics_Service:', parseErr.message);
-      channel.nack(msg, false, false); // dead-letter
-      return;
-    }
-
-    if (!event || !event.data) {
-      console.error('Analytics event missing data:', event);
+    if (!userId) {
+      console.error('User registered event missing userId:', event);
       channel.nack(msg, false, false);
       return;
     }
 
-    const { data = {} } = event;
+    // Insert into user_registrations
+    await pool.query(
+      `INSERT IGNORE INTO user_registrations (userId, createdAt)
+       VALUES (?, ?)`,
+      [userId, new Date(timestamp || Date.now())]
+    );
 
-    const eventType = event.eventType || event.type;
-    if (eventType !== 'analytics_reservations_daily') {
-      // Not expected on this queue; treat as dead-letter to avoid silent drops.
-      console.error('Unexpected event type on analytics.reservations.daily queue:', {
-        received: eventType,
-        event
-      });
-      channel.nack(msg, false, false);
-      return;
-    }
-
-    const dateStr = data.date || toISOOrNull(event.timestamp)?.split('T')[0];
-    const reservationLogs = Array.isArray(data.reservationLogs) ? data.reservationLogs : [];
-
-    if (!dateStr) {
-      console.error('Daily analytics message missing date:', { dateStr, event });
-      channel.nack(msg, false, false);
-      return;
-    }
-
-    // 1) Insert one analytics_logs row per reservation log
-    for (const rl of reservationLogs) {
-      const pid = rl?.providerId;
-      if (!pid) continue;
-
-      const isoTs = toISOOrNull(rl?.createdAt) || toISOOrNull(rl?.created_at) || toISOOrNull(event.timestamp) || new Date().toISOString();
-
-      await pool.query(
-        `INSERT INTO analytics_logs (provider_id, action_type, action_metadata, timestamp)
-         VALUES (?, ?, ?, ?)` ,
-        [pid, 'reservations_daily_batch', JSON.stringify(rl ?? {}), isoTs]
-      );
-    }
-
-    // 2) Update analytics_daily reservations_count from reservationLogs
-    // Reservation_Service daily payload has no data.providers; compute counts here.
-    const countsByProvider = new Map();
-    for (const rl of reservationLogs) {
-      const pid = rl?.providerId;
-      if (!pid) continue;
-      const prev = countsByProvider.get(pid) || 0;
-      countsByProvider.set(pid, prev + 1);
-    }
-
-    for (const [pid, count] of countsByProvider.entries()) {
-      if (!count) continue;
-      await pool.query(
-        `INSERT INTO analytics_daily (provider_id, date, reservations_count)
-         VALUES (?, ?, ?)
-         ON DUPLICATE KEY UPDATE reservations_count = reservations_count + VALUES(reservations_count), last_updated = CURRENT_TIMESTAMP`,
-        [pid, dateStr, count]
-      );
-    }
-
-    console.log(`Processed daily analytics reservations for date=${dateStr} logs=${reservationLogs.length}`);
+    console.log(`[user_registered] userId=${userId}`);
     channel.ack(msg);
   } catch (err) {
-    console.error('Error processing analytics event:', err.message);
+    console.error('Error processing user_registered event:', err.message);
     channel.nack(msg, false, false);
   }
 }
 
-async function startConsumer() {
-  if (!channel) {
-    throw new Error('RabbitMQ channel not initialized');
-  }
+/**
+ * Handle provider_registered event
+ */
+async function handleProviderRegisteredEvent(msg) {
+  if (!msg) return;
 
-  console.log(`Starting consumer on queue: ${QUEUE_NAME}`);
-  await channel.consume(QUEUE_NAME, handleAnalyticsEvent, { noAck: false });
+  try {
+    const content = msg.content.toString('utf8');
+    const event = JSON.parse(content);
+    
+    const { providerId, providerName, timestamp } = event;
+
+    if (!providerId || !providerName) {
+      console.error('Provider registered event missing required fields:', event);
+      channel.nack(msg, false, false);
+      return;
+    }
+
+    // Insert into provider_registrations
+    await pool.query(
+      `INSERT IGNORE INTO provider_registrations (providerId, providerName, createdAt)
+       VALUES (?, ?, ?)`,
+      [providerId, providerName, new Date(timestamp || Date.now())]
+    );
+
+    console.log(`[provider_registered] providerId=${providerId}, providerName=${providerName}`);
+    channel.ack(msg);
+  } catch (err) {
+    console.error('Error processing provider_registered event:', err.message);
+    channel.nack(msg, false, false);
+  }
 }
+
+/**
+ * Handle reservation_completed event
+ */
+async function handleReservationCompletedEvent(msg) {
+  if (!msg) return;
+
+  try {
+    const content = msg.content.toString('utf8');
+    const event = JSON.parse(content);
+    
+    const {
+      reservationId,
+      providerId,
+      providerName,
+      userId,
+      pointId,
+      status,
+      timestamp
+    } = event;
+
+    if (!reservationId || !providerId || !userId || !status) {
+      console.error('Reservation completed event missing required fields:', event);
+      channel.nack(msg, false, false);
+      return;
+    }
+
+    const eventTimestamp = new Date(timestamp || Date.now());
+    const eventDate = eventTimestamp.toISOString().split('T')[0];
+
+    // 1. Insert into reservation_events (raw event log)
+    await pool.query(
+      `INSERT INTO reservation_events 
+       (reservationId, providerId, providerName, userId, pointId, status, timestamp)
+       VALUES (?, ?, ?, ?, ?, ?, ?)`,
+      [reservationId, providerId, providerName || 'Unknown', userId, pointId || null, status, eventTimestamp]
+    );
+
+    // 2. Update provider daily stats
+    const isSuccess = status === 'success' ? 1 : 0;
+    const isFailed = status === 'failed' ? 1 : 0;
+
+    await pool.query(
+      `INSERT INTO provider_daily_stats 
+       (providerId, date, totalReservations, successfulReservations, failedReservations, uniqueUsers)
+       VALUES (?, ?, 1, ?, ?, 1)
+       ON DUPLICATE KEY UPDATE
+       totalReservations = totalReservations + 1,
+       successfulReservations = successfulReservations + VALUES(successfulReservations),
+       failedReservations = failedReservations + VALUES(failedReservations),
+       uniqueUsers = (
+         SELECT COUNT(DISTINCT userId) FROM reservation_events
+         WHERE providerId = ? AND DATE(timestamp) = ?
+       )`,
+      [providerId, eventDate, isSuccess, isFailed, providerId, eventDate]
+    );
+
+    // 3. Update global daily stats
+    await pool.query(
+      `INSERT INTO global_daily_stats 
+       (date, totalReservations, successfulReservations, failedReservations)
+       VALUES (?, 1, ?, ?)
+       ON DUPLICATE KEY UPDATE
+       totalReservations = totalReservations + 1,
+       successfulReservations = successfulReservations + VALUES(successfulReservations),
+       failedReservations = failedReservations + VALUES(failedReservations)`,
+      [eventDate, isSuccess, isFailed]
+    );
+
+    console.log(`[reservation_completed] reservationId=${reservationId}, providerId=${providerId}, status=${status}`);
+    channel.ack(msg);
+  } catch (err) {
+    console.error('Error processing reservation_completed event:', err.message);
+    channel.nack(msg, false, false);
+  }
+}
+
 
 async function closeConnection() {
   try {
@@ -169,7 +236,6 @@ async function connectWithRetry(maxRetries = 5, initialDelay = 2000) {
   while (attempt < maxRetries) {
     try {
       await connectRabbitMQ();
-      await startConsumer();
       return;
     } catch (err) {
       attempt++;
@@ -187,7 +253,7 @@ async function connectWithRetry(maxRetries = 5, initialDelay = 2000) {
 module.exports = {
   connectRabbitMQ,
   connectWithRetry,
-  startConsumer,
-  closeConnection
+  closeConnection,
+  channel: () => channel
 };
 

@@ -259,9 +259,59 @@ async function publishAnalyticsDaily(payload) {
   }
 }
 
+/**
+ * Publish reservation_completed event to Analytics Service
+ * This event contains details about both successful and failed reservations
+ */
+async function publishReservationCompleted(eventData) {
+  try {
+    if (!channel) {
+      throw new Error('RabbitMQ channel not initialized');
+    }
+
+    const {
+      reservationId,
+      providerId,
+      providerName,
+      userId,
+      pointId,
+      status, // 'success' or 'failed'
+      timestamp
+    } = eventData;
+
+    const message = {
+      reservationId,
+      providerId,
+      providerName,
+      userId,
+      pointId,
+      status,
+      timestamp
+    };
+
+    // Declare exchange if not exists
+    const SAAS_EVENTS_EXCHANGE = 'saas_events';
+    await channel.assertExchange(SAAS_EVENTS_EXCHANGE, 'topic', { durable: true });
+
+    const messageBuffer = Buffer.from(JSON.stringify(message));
+    const published = channel.publish(SAAS_EVENTS_EXCHANGE, 'reservation.completed', messageBuffer);
+
+    if (!published) {
+      console.warn('[RabbitMQ] Reservation completed event may not have been queued (backpressure)');
+    }
+
+    console.log(`[RabbitMQ] Event published: reservation.completed (${status}) for reservation ${reservationId}`);
+    return true;
+  } catch (error) {
+    console.error('[RabbitMQ] publishReservationCompleted error:', error.message);
+    throw error;
+  }
+}
+
 module.exports = {
   connectWithRetry,
   publishReservationEvent,
+  publishReservationCompleted,
   publishAnalyticsDaily,
   requestPointLookup,
   requestAdapterReservation,

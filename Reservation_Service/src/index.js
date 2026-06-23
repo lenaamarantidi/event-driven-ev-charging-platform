@@ -1,7 +1,7 @@
 /**
  * Reservation Service (Port 3009)
  * * Unified API for reserving EV charging points across multiple providers
- * Publishes reservation_successful events to RabbitMQ for Points service and daily analytics batches to Analytics service
+ * Publishes reservation_successful events to RabbitMQ for Points service and reservation.completed events to Analytics service
  */
 
 const express = require('express');
@@ -15,7 +15,7 @@ app.use(express.json());
 
 // Import modules
 const { initializeDatabase, testDatabaseConnection, getPool } = require('./db');
-const { connectWithRetry, publishReservationEvent, publishAnalyticsDaily, requestPointLookup, requestAdapterReservation } = require('./rabbitmq');
+const { connectWithRetry, publishReservationEvent, publishReservationCompleted, publishAnalyticsDaily, requestPointLookup, requestAdapterReservation } = require('./rabbitmq');
 const { logReservation } = require('./db');
 
 
@@ -164,6 +164,17 @@ async function handleReservationRequest({ pointId, minutes, userId, providerName
       reservation_status: status
     });
   }
+
+  // Publish reservation_completed event to Analytics Service for both success and failure cases
+  await publishReservationCompleted({
+    reservationId,
+    providerId: providerName === 'greenPlug' ? 2 : providerName === 'bluePlug' ? 3 : 1,
+    providerName,
+    userId,
+    pointId,
+    status: successful ? 'success' : 'failed',
+    timestamp: new Date().toISOString()
+  });
 
   return {
     success: successful,

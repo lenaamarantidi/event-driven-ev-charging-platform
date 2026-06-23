@@ -6,6 +6,7 @@
 const { pool } = require('./db');
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
+const { publishProviderRegistered } = require('./rabbitmq');
 
 const JWT_SECRET = process.env.JWT_SECRET || 'provider_jwt_secret';
 const JWT_EXPIRY = process.env.JWT_EXPIRY || '15m';
@@ -266,7 +267,7 @@ async function registerProvider(req, res) {
         endpoint_reserve,
         endpoint_reserve_duration,
         status
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'active')`,
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'active')`,
       [
         normalizedProvider.provider_name,
         normalizedProvider.provider_email,
@@ -290,6 +291,9 @@ async function registerProvider(req, res) {
     );
 
     const newProvider = providers[0];
+
+    // Publish provider_registered event to Analytics Service
+    await publishProviderRegistered(newProvider.provider_id, newProvider.provider_name, new Date().toISOString());
 
     return res.status(201).json({
       message: 'Provider registered successfully',

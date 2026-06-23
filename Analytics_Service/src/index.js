@@ -1,6 +1,6 @@
 /**
  * Analytics Service
- * UC04: View own analytics
+ * Provides analytics, KPI metrics, and reporting
  * Port: 3102
  * 
  * Handles analytics event consumption via RabbitMQ
@@ -13,10 +13,12 @@ const { initializeDatabase, testConnection } = require('./db');
 const { connectWithRetry, closeConnection } = require('./rabbitmq');
 const {
   getProviderAnalytics,
-  getProviderDailyAnalytics,
+  getProviderTimeseries,
   getGlobalAnalytics,
+  getGlobalTimeseries,
+  getGlobalRankings,
+  getBillingStats,
   exportProviderLogs,
-  requestInvoiceGeneration,
   healthCheck
 } = require('./controllers');
 
@@ -28,7 +30,7 @@ app.use(express.json());
 
 // Request logging middleware
 app.use((req, res, next) => {
-  console.log(`[${new Date().toLocaleString('el-GR', { timeZone: 'Europe/Athens', hour12: false })}] ${req.method} ${req.path}`);
+  console.log(`[${new Date().toISOString()}] ${req.method} ${req.path}`);
   next();
 });
 
@@ -43,50 +45,39 @@ app.get('/', (req, res) => {
   res.json({
     service: 'Analytics Service',
     version: '1.0.0',
-    description: 'UC04: View own analytics',
+    description: 'Provides analytics, KPI metrics, and reporting',
     port: PORT,
     endpoints: [
-      'GET /api/analytics/provider/:providerId',
-      'GET /api/analytics/provider/:providerId/daily',
-      'GET /api/analytics/global',
+      'GET /analytics/providers/:providerId',
+      'GET /analytics/providers/:providerId/timeseries',
+      'GET /analytics/providers/:providerId/export',
+      'GET /analytics/global',
+      'GET /analytics/global/timeseries',
+      'GET /analytics/global/rankings',
+      'POST /analytics/billing/request',
       'GET /health'
     ]
   });
 });
 
 /**
- * Get provider analytics
- * GET /api/analytics/provider/:providerId
- * Query params: period (daily, weekly, monthly), startDate, endDate
+ * Provider Analytics
  */
-app.get('/api/analytics/provider/:providerId', getProviderAnalytics);
+app.get('/analytics/providers/:providerId', getProviderAnalytics);
+app.get('/analytics/providers/:providerId/timeseries', getProviderTimeseries);
+app.get('/analytics/providers/:providerId/export', exportProviderLogs);
 
 /**
- * Get provider daily analytics breakdown
- * GET /api/analytics/provider/:providerId/daily
+ * Global/Operator Analytics
  */
-app.get('/api/analytics/provider/:providerId/daily', getProviderDailyAnalytics);
+app.get('/analytics/global', getGlobalAnalytics);
+app.get('/analytics/global/timeseries', getGlobalTimeseries);
+app.get('/analytics/global/rankings', getGlobalRankings);
 
 /**
- * UC08: Export provider logs
- * GET /api/analytics/provider/:providerId/export
- * Query params: format (csv or json), startDate, endDate
- * Downloads activity logs as file
+ * Billing Service Integration
  */
-app.get('/api/analytics/provider/:providerId/export', exportProviderLogs);
-
-/**
- * UC04 Extension: Request invoice generation
- * POST /api/analytics/provider/:providerId/request-invoice
- * Body: { period, startDate, endDate }
- */
-app.post('/api/analytics/provider/:providerId/request-invoice', requestInvoiceGeneration);
-
-/**
- * Get global analytics (all providers)
- * GET /api/analytics/global
- */
-app.get('/api/analytics/global', getGlobalAnalytics);
+app.post('/analytics/billing/request', getBillingStats);
 
 /**
  * Health check endpoint
@@ -97,26 +88,9 @@ app.get('/health', healthCheck);
 // Error Handlers
 // =====================
 
-/**
- * 404 handler
- */
-app.use((req, res) => {
-  res.status(404).json({
-    error: 'Endpoint not found',
-    path: req.path,
-    method: req.method
-  });
-});
-
-/**
- * Global error handler
- */
 app.use((err, req, res, next) => {
-  console.error('Unhandled error:', err.message);
-  res.status(500).json({
-    error: 'Internal server error',
-    message: err.message
-  });
+  console.error('Unhandled error:', err);
+  res.status(500).json({ error: 'Internal server error', message: err.message });
 });
 
 // =====================
@@ -125,58 +99,47 @@ app.use((err, req, res, next) => {
 
 async function startServer() {
   try {
-    console.log('Starting Analytics Service...');
-
     // Initialize database
-    console.log('Initializing database...');
     await initializeDatabase();
+    console.log('Database initialized');
 
     // Test database connection
-    const connected = await testConnection();
-    if (!connected) {
-      throw new Error('Database connection test failed');
+    const isConnected = await testConnection();
+    if (!isConnected) {
+      throw new Error('Failed to connect to database');
     }
     console.log('Database connection successful');
 
     // Connect to RabbitMQ
-    console.log('Connecting to RabbitMQ...');
-    await connectWithRetry(5, 2000);
-    console.log('RabbitMQ connection successful');
+    try {
+      await connectWithRetry();
+      console.log('RabbitMQ connected and listening for events');
+    } catch (err) {
+      console.error('Warning: Could not connect to RabbitMQ, service will continue without event consumption:', err.message);
+    }
 
     // Start Express server
     app.listen(PORT, () => {
-      console.log(`✓ Analytics Service listening on port ${PORT}`);
-      console.log(`✓ Database: ${process.env.DB_NAME || 'analytics_db'}`);
-      console.log(`✓ RabbitMQ: ${process.env.RABBITMQ_URL || 'amqp://localhost'}`);
-      console.log(`✓ Consuming events from analytics_exchange`);
+      console.log(`[${new Date().toISOString()}] Analytics Service running on port ${PORT}`);
     });
   } catch (err) {
-    console.error('Failed to start server:', err.message);
+    console.error('Failed to start Analytics Service:', err.message);
     process.exit(1);
   }
 }
 
-// =====================
-// Graceful Shutdown
-// =====================
+// Graceful shutdown
+process.on('SIGTERM', async () => {
+  console.log('SIGTERM received, shutting down gracefully...');
+  await closeConnection();
+  process.exit(0);
+});
 
-async function gracefulShutdown(signal) {
-  console.log(`\nReceived ${signal}, shutting down gracefully...`);
-  try {
-    await closeConnection();
-    process.exit(0);
-  } catch (err) {
-    console.error('Error during shutdown:', err.message);
-    process.exit(1);
-  }
-}
+process.on('SIGINT', async () => {
+  console.log('SIGINT received, shutting down gracefully...');
+  await closeConnection();
+  process.exit(0);
+});
 
-process.on('SIGTERM', () => gracefulShutdown('SIGTERM'));
-process.on('SIGINT', () => gracefulShutdown('SIGINT'));
+startServer();
 
-// Start the server
-if (require.main === module) {
-  startServer();
-}
-
-module.exports = app;

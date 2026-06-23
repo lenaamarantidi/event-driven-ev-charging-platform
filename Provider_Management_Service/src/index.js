@@ -9,6 +9,7 @@
 
 const express = require('express');
 const { initializeDatabase, testConnection } = require('./db');
+const { connectWithRetry, closeConnection } = require('./rabbitmq');
 const {
   registerProvider,
   loginProvider,
@@ -147,6 +148,13 @@ async function startServer() {
     }
     console.log('Database connection successful');
 
+    // Try to connect to RabbitMQ, but don't fail if it's unavailable
+    try {
+      await connectWithRetry(5, 2000);
+    } catch (err) {
+      console.warn('Warning: Could not connect to RabbitMQ, provider registration events will not be published:', err.message);
+    }
+
     // Start Express server
     app.listen(PORT, () => {
       console.log(`✓ Provider Management Service listening on port ${PORT}`);
@@ -165,6 +173,7 @@ async function startServer() {
 async function gracefulShutdown(signal) {
   console.log(`\nReceived ${signal}, shutting down gracefully...`);
   try {
+    await closeConnection();
     process.exit(0);
   } catch (err) {
     console.error('Error during shutdown:', err.message);
