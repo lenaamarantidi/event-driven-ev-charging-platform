@@ -255,6 +255,109 @@ function scheduleReservationExpiry(pointId, reservationEndTime) {
   }
 }
 
+// =================================================================
+// HELPER FUNCTION: Update point reserve status with sync
+// =================================================================
+
+/**
+ * Update point reservation status in DB and sync with other services
+ * @param {string} newStatus - The new status to set
+ * @param {string|null} reservationEndTime - The reservation end time (updated if non-empty)
+ * @param {string|number} pointId - The point ID to update
+ * @param {string} service - Current service name
+ * @param {Object} req - Express request object (for protocol)
+ * @param {Object} point - The point data from DB (needed for central service to determine target plug)
+ * @returns {Promise<Object>} - Object containing remainingMs, centralUpdateResult, targetServiceUpdateResult
+ */
+async function update_point_reserve_status(newStatus, reservationEndTime, pointId, service, req, point) {
+  // Single UPDATE statement => atomic: either the whole row is updated or none.
+  await pointsMysql.query(
+    'UPDATE points SET status = ?, reservation_end_time = ?, last_updated = CURRENT_TIMESTAMP WHERE point_id = ?',
+    [newStatus, reservationEndTime || null, pointId]
+  );
+
+  console.log(`✓ Point ${pointId} reserved successfully, status updated to ${newStatus} in ${service} DB`);
+
+  const remainingMs = scheduleReservationExpiry(pointId, reservationEndTime);
+
+  // Also update other services based on current service
+  const s = String(service).toLowerCase();
+  let centralUpdateResult = null;
+  let targetServiceUpdateResult = null;
+
+  // If current service is red/green/blue, also update central DB
+  if (s.includes('red') || s.includes('green') || s.includes('blue')) {
+    try {
+      const centralPort = process.env.POINTS_CENTRAL_PORT;
+      if (centralPort) {
+        const protocol = req.protocol;
+        const serviceHost = 'host.docker.internal';
+        const centralUrl = `${protocol}://${serviceHost}:${centralPort}${DB_POINT_UPDATE.replace(':pointId', pointId)}`;
+        console.log(`[API_POINTS_RESERVE] Also updating central DB at ${centralUrl} with payload:`, { status: newStatus, reservation_end_time: reservationEndTime });
+        const centralResponse = await axios.put(centralUrl, { status: newStatus, reservation_end_time: reservationEndTime });
+        centralUpdateResult = {
+          service: 'central',
+          updated: true,
+          result: centralResponse.data
+        };
+      }
+    } catch (err) {
+      console.error(`[API_POINTS_RESERVE] Failed to update central DB:`, err.message);
+      centralUpdateResult = {
+        service: 'central',
+        updated: false,
+        error: err.message
+      };
+    }
+  }
+  // If current service is central, find which plug the point belongs to and update that service
+  else if (s.includes('central')) {
+    // Determine which plug the point belongs to based on provider_name
+    const pointProvider = point?.provider_name || '';
+    let targetPlug = null;
+    if (pointProvider.includes('red')) targetPlug = 'red';
+    else if (pointProvider.includes('green')) targetPlug = 'green';
+    else if (pointProvider.includes('blue')) targetPlug = 'blue';
+
+    if (targetPlug) {
+      const portMap = {
+        red: process.env.POINTS_RED_PORT,
+        green: process.env.POINTS_GREEN_PORT,
+        blue: process.env.POINTS_BLUE_PORT
+      };
+      const targetPort = portMap[targetPlug];
+
+      if (targetPort) {
+        try {
+          const protocol = req.protocol;
+          const serviceHost = 'host.docker.internal';
+          const targetUrl = `${protocol}://${serviceHost}:${targetPort}${DB_POINT_UPDATE.replace(':pointId', pointId)}`;
+          console.log(`[API_POINTS_RESERVE] Central service updating ${targetPlug} DB at ${targetUrl} with payload:`, { status: newStatus, reservation_end_time: reservationEndTime });
+          const targetResponse = await axios.put(targetUrl, { status: newStatus, reservation_end_time: reservationEndTime });
+          targetServiceUpdateResult = {
+            service: targetPlug,
+            updated: true,
+            result: targetResponse.data
+          };
+        } catch (err) {
+          console.error(`[API_POINTS_RESERVE] Failed to update ${targetPlug} DB:`, err.message);
+          targetServiceUpdateResult = {
+            service: targetPlug,
+            updated: false,
+            error: err.message
+          };
+        }
+      }
+    }
+  }
+
+  return {
+    remainingMs,
+    centralUpdateResult,
+    targetServiceUpdateResult
+  };
+}
+
 // ============== REST ENDPOINTS CONST URLS ==============
 
 const API_POINTS = '/api/points';
@@ -935,91 +1038,7 @@ const { pointId } = req.params;
       });
     }
 
-    try {
-      // Single UPDATE statement => atomic: either the whole row is updated or none.
-      await pointsMysql.query(
-        'UPDATE points SET status = ?, reservation_end_time = ?, last_updated = CURRENT_TIMESTAMP WHERE point_id = ?',
-        [newStatus, reservationEndTime || null, pointId]
-      );
-    } catch (dbErr) {
-      // If DB fails, do not mask the provider reservation result; return error to caller.
-      throw dbErr;
-    }
-
-    console.log(`✓ Point ${pointId} reserved successfully, status updated to ${newStatus} in ${service} DB`);
-
-    const remainingMs = scheduleReservationExpiry(pointId, reservationEndTime);
-
-    // Also update other services based on current service
-    const s = String(service).toLowerCase();
-    let centralUpdateResult = null;
-    let targetServiceUpdateResult = null;
-
-    // If current service is red/green/blue, also update central DB
-    if (s.includes('red') || s.includes('green') || s.includes('blue')) {
-      try {
-        const centralPort = process.env.POINTS_CENTRAL_PORT;
-        if (centralPort) {
-          const protocol = req.protocol;
-          const serviceHost = 'host.docker.internal';
-          const centralUrl = `${protocol}://${serviceHost}:${centralPort}${DB_POINT_UPDATE.replace(':pointId', pointId)}`;
-          console.log(`[API_POINTS_RESERVE] Also updating central DB at ${centralUrl} with payload:`, { status: newStatus, reservation_end_time: reservationEndTime });
-          const centralResponse = await axios.put(centralUrl, { status: newStatus, reservation_end_time: reservationEndTime });
-          centralUpdateResult = {
-            service: 'central',
-            updated: true,
-            result: centralResponse.data
-          };
-        }
-      } catch (err) {
-        console.error(`[API_POINTS_RESERVE] Failed to update central DB:`, err.message);
-        centralUpdateResult = {
-          service: 'central',
-          updated: false,
-          error: err.message
-        };
-      }
-    }
-    // If current service is central, find which plug the point belongs to and update that service
-    else if (s.includes('central')) {
-      // Determine which plug the point belongs to based on provider_name
-      const pointProvider = point?.provider_name || '';
-      let targetPlug = null;
-      if (pointProvider.includes('red')) targetPlug = 'red';
-      else if (pointProvider.includes('green')) targetPlug = 'green';
-      else if (pointProvider.includes('blue')) targetPlug = 'blue';
-
-      if (targetPlug) {
-        const portMap = {
-          red: process.env.POINTS_RED_PORT,
-          green: process.env.POINTS_GREEN_PORT,
-          blue: process.env.POINTS_BLUE_PORT
-        };
-        const targetPort = portMap[targetPlug];
-
-        if (targetPort) {
-          try {
-            const protocol = req.protocol;
-            const serviceHost = 'host.docker.internal';
-            const targetUrl = `${protocol}://${serviceHost}:${targetPort}${DB_POINT_UPDATE.replace(':pointId', pointId)}`;
-            console.log(`[API_POINTS_RESERVE] Central service updating ${targetPlug} DB at ${targetUrl} with payload:`, { status: newStatus, reservation_end_time: reservationEndTime });
-            const targetResponse = await axios.put(targetUrl, { status: newStatus, reservation_end_time: reservationEndTime });
-            targetServiceUpdateResult = {
-              service: targetPlug,
-              updated: true,
-              result: targetResponse.data
-            };
-          } catch (err) {
-            console.error(`[API_POINTS_RESERVE] Failed to update ${targetPlug} DB:`, err.message);
-            targetServiceUpdateResult = {
-              service: targetPlug,
-              updated: false,
-              error: err.message
-            };
-          }
-        }
-      }
-    }
+    const updateResult = await update_point_reserve_status(newStatus, reservationEndTime, pointId, service, req, point);
 
     // Build response with all update results
     const responseData = {
@@ -1028,15 +1047,15 @@ const { pointId } = req.params;
       status: newStatus,
       reservationEndTime: reservationEndTime,
       timestamp: new Date(),
-      expiresIn: `${Math.floor(remainingMs / 1000)} seconds`,
+      expiresIn: `${Math.floor(updateResult.remainingMs / 1000)} seconds`,
       message: `Point ${pointId} reserved successfully via ${provider} both on provider api and DB`
     };
 
-    if (centralUpdateResult) {
-      responseData.centralService = centralUpdateResult;
+    if (updateResult.centralUpdateResult) {
+      responseData.centralService = updateResult.centralUpdateResult;
     }
-    if (targetServiceUpdateResult) {
-      responseData.targetService = targetServiceUpdateResult;
+    if (updateResult.targetServiceUpdateResult) {
+      responseData.targetService = updateResult.targetServiceUpdateResult;
     }
 
     res.json(responseData);
