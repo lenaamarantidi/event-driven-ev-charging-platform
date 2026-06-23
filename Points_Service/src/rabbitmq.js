@@ -6,6 +6,7 @@
  */
 
 const amqp = require('amqplib');
+const { toMySQLDateTime } = require('./plugs_api');
 
 const RABBITMQ_URL = process.env.RABBITMQ_URL || 'amqp://localhost';
 const EXCHANGE_NAME = process.env.POINTS_RESERVATION_EXCHANGE || 'reservation_exchange';
@@ -60,7 +61,7 @@ async function handleMessage(msg) {
 
     const [result] = await pointsDb.query(
       'UPDATE points SET status = ?, reservation_end_time = ?, last_updated = CURRENT_TIMESTAMP WHERE point_id = ?',
-      [reservationStatus, reservationEndTime, pointId]
+      [reservationStatus, toMySQLDateTime(reservationEndTime), pointId]
     );
 
     if (result.affectedRows === 0) {
