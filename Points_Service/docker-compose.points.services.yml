@@ -10,6 +10,7 @@ services:
       MARIADB_PORT: ${POINTS_GREEN_MARIADB_PORT}
       MARIADB_HOST: host.docker.internal
       BEARER_TOKEN: ${BEARER_TOKEN}
+      RABBITMQ_URL: amqp://guest:guest@host.docker.internal:5672
       POINTS_CENTRAL_PORT: ${POINTS_CENTRAL_PORT}
       POINTS_RED_PORT: ${POINTS_RED_PORT}
       POINTS_GREEN_PORT: ${POINTS_GREEN_PORT}
@@ -29,6 +30,7 @@ services:
       MARIADB_PORT: ${POINTS_RED_MARIADB_PORT}
       MARIADB_HOST: host.docker.internal
       BEARER_TOKEN: ${BEARER_TOKEN}
+      RABBITMQ_URL: amqp://guest:guest@host.docker.internal:5672
       POINTS_CENTRAL_PORT: ${POINTS_CENTRAL_PORT}
       POINTS_RED_PORT: ${POINTS_RED_PORT}
       POINTS_GREEN_PORT: ${POINTS_GREEN_PORT}
@@ -48,6 +50,7 @@ services:
       MARIADB_PORT: ${POINTS_BLUE_MARIADB_PORT}
       MARIADB_HOST: host.docker.internal
       BEARER_TOKEN: ${BEARER_TOKEN}
+      RABBITMQ_URL: amqp://guest:guest@host.docker.internal:5672
       POINTS_CENTRAL_PORT: ${POINTS_CENTRAL_PORT}
       POINTS_RED_PORT: ${POINTS_RED_PORT}
       POINTS_GREEN_PORT: ${POINTS_GREEN_PORT}
@@ -67,6 +70,7 @@ services:
       MARIADB_PORT: ${POINTS_CENTRAL_MARIADB_PORT}
       MARIADB_HOST: host.docker.internal
       BEARER_TOKEN: ${BEARER_TOKEN}
+      RABBITMQ_URL: amqp://guest:guest@host.docker.internal:5672
       POINTS_RED_PORT: ${POINTS_RED_PORT}
       POINTS_GREEN_PORT: ${POINTS_GREEN_PORT}
       POINTS_BLUE_PORT: ${POINTS_BLUE_PORT}
