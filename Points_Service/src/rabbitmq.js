@@ -18,10 +18,12 @@ let connection = null;
 let channel = null;
 let pointsDb = null;
 let scheduleReservationExpiryFn = null;
+let notifyPointUpdateFn = null;
 
-function setDependencies({ db, scheduleReservationExpiry }) {
+function setDependencies({ db, scheduleReservationExpiry, notifyPointUpdate }) {
   pointsDb = db;
   scheduleReservationExpiryFn = scheduleReservationExpiry;
+  notifyPointUpdateFn = notifyPointUpdate;
 }
 
 async function connectRabbitMQ() {
@@ -79,6 +81,13 @@ async function handleMessage(msg) {
       if (reservationEndTime && typeof scheduleReservationExpiryFn === 'function') {
         scheduleReservationExpiryFn(pointId, reservationEndTime);
       }
+      // Push SSE update to all connected frontend clients
+      try {
+        const [freshRows] = await pointsDb.query('SELECT * FROM points WHERE point_id = ?', [pointId]);
+        if (freshRows.length > 0 && typeof notifyPointUpdateFn === 'function') {
+          notifyPointUpdateFn(freshRows[0]);
+        }
+      } catch (_) {}
     }
 
     channel.ack(msg);

@@ -22,38 +22,51 @@ const normalizePoints = (locations, userLocation) => {
   if (!Array.isArray(locations)) return [];
 
   return locations.map((location) => {
-    const lat = parseFloat(location.latitude);
-    const lon = parseFloat(location.longitude);
-    const distance = location.distance_km || calculateDistance(userLocation[0], userLocation[1], lat, lon);
+    // Handle Points Service format (new backend-first architecture)
+    const lat = parseFloat(location.lat || location.latitude || 37.9755);
+    const lon = parseFloat(location.lon || location.longitude || 23.7348);
+    const distance = calculateDistance(userLocation[0], userLocation[1], lat, lon);
     
-    // Extract unique connector types from all outlets
+    // Convert connector code to semantic name
+    const connectorMap = {
+      '3': 'Type 3',
+      '7': 'CHAdeMO',
+      '20': 'Type 2',
+      '24': 'CCS2',
+      'null': 'Other'
+    };
+    
     const connectorTypesSet = new Set();
-    let firstOutletData = { kwhprice: 0.45, cap: 0 };
+    if (location.connector) {
+      const semanticName = connectorMap[location.connector] || 'Other';
+      connectorTypesSet.add(semanticName);
+    } else if (!location.connector && !location.outlets) {
+      // No connector and no outlets data = "Other"
+      connectorTypesSet.add('Other');
+    }
     
+    // If outlets data exists (legacy format), extract from there
     if (Array.isArray(location.outlets) && location.outlets.length > 0) {
       location.outlets.forEach(outlet => {
         if (outlet.connector_type) {
           connectorTypesSet.add(outlet.connector_type);
         }
       });
-      // Use first outlet's data as default
-      firstOutletData = {
-        kwhprice: location.outlets[0].kwhprice || 0.45,
-        cap: location.outlets[0].kilowatts || 0
-      };
     }
     
     return {
-      pointid: String(location.id),
+      pointid: String(location.id || location.point_id),
       lat,
       lon,
-      name: location.name || 'Unknown Location',
+      name: location.location_name || location.name || 'Unknown Location',
       address: location.address || '',
       connector_types: Array.from(connectorTypesSet),
-      kwhprice: firstOutletData.kwhprice,
-      cap: firstOutletData.cap,
+      kwhprice: parseFloat(location.kwh_price || location.kwhprice || 0.45),
+      cap: parseFloat(location.capacity_kw || location.cap || 0),
       distance,
-      outlets: location.outlets || []
+      outlets: location.outlets || [],
+      status: location.status || 'unknown',
+      providerName: location.provider_name || location.providerName || 'Unknown'
     };
   });
 };
@@ -65,7 +78,6 @@ const Home = ({ setToken }) => {
   const [selectedCharger, setSelectedCharger] = useState(null);
   const [userLocation, setUserLocation] = useState([37.9755, 23.7348]); 
   const [searchText, setSearchText] = useState("");
-  const [savedCard, setSavedCard] = useState(null);
   const [gpsError, setGpsError] = useState(null);
   const [noChargersMessage, setNoChargersMessage] = useState(null);
 
@@ -84,7 +96,8 @@ const Home = ({ setToken }) => {
     powerMin: 0,
     powerMax: 350,
     avail: [],
-    type: []
+    type: [],
+    connectorTypes: []
   });
 
   // Track window width for responsive design
@@ -166,111 +179,51 @@ const Home = ({ setToken }) => {
       try {
         const params = {
           lat: userLocation[0],
-          lon: userLocation[1]
+          lon: userLocation[1],
+          costMin: filters.costMin,
+          costMax: filters.costMax,
+          powerMin: filters.powerMin,
+          powerMax: filters.powerMax
         };
         
         // Only add distance limit if < 100 (100+ means unlimited)
         if (filters.dist < 100) {
-          params.max_distance_km = filters.dist;
+          params.radius = filters.dist;
+        }
+
+        // Add availability filter if selected
+        if (filters.avail && filters.avail.length > 0) {
+          params.avail = filters.avail.join(',');
+        }
+
+        // Add connector type filter if selected
+        if (filters.connectorTypes && filters.connectorTypes.length > 0) {
+          params.connectorType = filters.connectorTypes.join(',');
+        }
+
+        if (filters.type && filters.type.length > 0) {
+          params.type = filters.type.join(',');
         }
 
         const token = localStorage.getItem('token');
-        const res = await axios.get(`${BASE_URL}/ui/locations`, {
+        console.log('[Home] Fetching points with params:', params);
+        const res = await axios.get(`${BASE_URL}/points`, {
           params,
           headers: token ? { Authorization: `Bearer ${token}` } : {}
         });
-        const normalized = normalizePoints(res.data, userLocation).map((location) => ({
+        const normalized = normalizePoints(res.data.points || res.data, userLocation).map((location) => ({
           ...location,
           charger_type: (location.cap || 0) <= 22 ? 'AC' : 'DC'
         }));
         setChargers(normalized);
-        // Store all chargers globally for alternative suggestions
-        window.allChargers = normalized;
+        const sorted = [...normalized].sort((a, b) => a.distance - b.distance);
+        setFilteredChargers(sorted);
+        setNoChargersMessage(sorted.length === 0 ? 'No available chargers with the selected filters. Try adjusting your filters.' : null);
+        window.allChargers = sorted;
       } catch (err) { console.error(err); }
     };
     fetchData();
   }, [userLocation, filters]);
-
-  // Apply Filters 
-  useEffect(() => {
-    let result = chargers;
-    
-    // Availability filter - check if location has at least one outlet matching selected statuses
-    if (filters.avail.length > 0) {
-      result = result.filter(location => {
-        const outlets = location.outlets || [];
-        return outlets.some(outlet => {
-          const outletStatus = outlet.status;
-          // Map outlet status to filter status values
-          if (filters.avail.includes('available') && outletStatus === 'available') return true;
-          if (filters.avail.includes('occupied') && (outletStatus === 'charging' || outletStatus === 'reserved')) return true;
-          if (filters.avail.includes('unavailable') && (outletStatus === 'offline' || outletStatus === 'malfunction')) return true;
-          if (filters.avail.includes('booked_by_me') && outletStatus === 'booked_by_me') return true;
-          return false;
-        });
-      });
-    }
-    
-    // Price filter - check if location has at least one outlet in price range
-    result = result.filter(location => {
-      const outlets = location.outlets || [];
-      if (outlets.length === 0) return false;
-      return outlets.some(outlet => {
-        const price = outlet.kwhprice || 0;
-        return price >= filters.costMin && price <= filters.costMax;
-      });
-    });
-    
-    // Power filter - check if location has at least one outlet within power range
-    if (filters.powerMin >= 0 && filters.powerMax > 0) {
-      result = result.filter(location => {
-        const outlets = location.outlets || [];
-        return outlets.some(outlet => {
-          const kw = outlet.kilowatts || 0;
-          return kw >= filters.powerMin && kw <= filters.powerMax;
-        });
-      });
-    }
-    
-    // Charger type filter (AC/DC) - check if location has outlets matching type
-    if (filters.type.length > 0) {
-      result = result.filter(location => {
-        const outlets = location.outlets || [];
-        return outlets.some(outlet => {
-          const kilowatts = outlet.kilowatts || 0;
-          const outletType = kilowatts <= 22 ? 'AC' : 'DC';
-          return filters.type.includes(outletType);
-        });
-      });
-    }
-    
-    // Filter by connector types
-    if (filters.connectorTypes && filters.connectorTypes.length > 0) {
-      result = result.filter(c => {
-        const chargerConnectors = c.connector_types || [];
-        const hasMatch = filters.connectorTypes.some(selected => 
-          selected === 'Other' 
-            ? chargerConnectors.length === 0  // Show locations with no connector types
-            : chargerConnectors.includes(selected)  // Show locations with this connector
-        );
-        return hasMatch;
-      });
-    }
-    
-    // Distance filter (skip if 100+ = unlimited)
-    if (filters.dist < 100) {
-      result = result.filter(c => c.distance <= filters.dist);
-    }
-    
-    setFilteredChargers(result);
-    
-    // Show message if no chargers match filters
-    if (result.length === 0 && chargers.length > 0) {
-      setNoChargersMessage("No available chargers with the selected filters. Try adjusting your filters.");
-    } else {
-      setNoChargersMessage(null);
-    }
-  }, [filters, chargers]);
 
   // Logout Function 
   const handleLogout = () => {
@@ -365,7 +318,7 @@ const Home = ({ setToken }) => {
         
         {activeTab === 'account' && (
           <div className="w-100 overflow-auto" style={{ backgroundColor: '#1a1428' }}>
-             <Account savedCard={savedCard} setSavedCard={setSavedCard} />
+             <Account />
           </div>
         )}
 
@@ -430,8 +383,6 @@ const Home = ({ setToken }) => {
                     <div className="p-3 overflow-auto" style={{ flex: 1, minHeight: 0 }}>
                       <InfoPanel 
                         charger={selectedCharger} 
-                        savedCard={savedCard} 
-                        setSavedCard={setSavedCard}
                         filters={filters}
                         onClose={() => setInfoPanelOpen(false)}
                       />
@@ -471,13 +422,7 @@ const Home = ({ setToken }) => {
                       <div className="p-3" style={{ flex: 1, minHeight: 0, overflow: 'auto' }}>
                         <InfoPanel 
                           charger={selectedCharger} 
-                          savedCard={savedCard} 
-                          setSavedCard={setSavedCard}
-                          reservationWindow={filters.filterMode === 'reservation' ? {
-                            resDate: filters.resDate,
-                            resTime: filters.resTime,
-                            resDuration: filters.resDuration
-                          } : null}
+                          filters={filters}
                           onClose={() => setSelectedCharger(null)}
                         />
                       </div>

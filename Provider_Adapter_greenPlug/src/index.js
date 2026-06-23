@@ -222,6 +222,22 @@ async function startBrokerSyncConsumer() {
   console.log(`[greenPlug] RabbitMQ reserve consumer ready on ${ADAPTER_RESERVE_QUEUE}`);
 }
 
+async function startBrokerSyncConsumerWithRetry(attempt = 1, maxAttempts = 10) {
+  try {
+    await startBrokerSyncConsumer();
+  } catch (err) {
+    console.error(`[greenPlug] Failed to start broker sync consumer (attempt ${attempt}/${maxAttempts}):`, err.message);
+    if (attempt < maxAttempts) {
+      const delayMs = Math.min(2000 * attempt, 10000);
+      setTimeout(() => {
+        startBrokerSyncConsumerWithRetry(attempt + 1, maxAttempts).catch((retryErr) => {
+          console.error('[greenPlug] Broker sync consumer retry failed:', retryErr.message);
+        });
+      }, delayMs);
+    }
+  }
+}
+
 app.get('/health', (req, res) => res.json({ status: 'ok', provider: 'greenPlug' }));
 
 app.get('/api/points', async (req, res) => {
@@ -260,7 +276,7 @@ app.listen(PORT, () => {
   console.log(`[greenPlug] Manual sync endpoint: POST /internal/sync-now`);
   console.log(`[greenPlug] Query endpoints: GET /api/points, GET /api/points/:pointId`);
   console.log(`[greenPlug] WARNING: Automatic sync disabled - Points Service orchestrates sync schedule`);
-  startBrokerSyncConsumer().catch((err) => {
-    console.error('[greenPlug] Failed to start broker sync consumer:', err.message);
+  startBrokerSyncConsumerWithRetry().catch((err) => {
+    console.error('[greenPlug] Failed to initialize broker sync consumer:', err.message);
   });
 });
