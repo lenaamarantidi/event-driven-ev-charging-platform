@@ -153,6 +153,38 @@ function buildProviderUrl(plugKey, pathKey, pathArgs) {
 }
 
 /**
+ * Normalize reservation end time from provider formats to ISO UTC.
+ * Handles e.g. "2026-06-23 07:16" (bluePlug status) and "2026-06-23T07:16:00.000Z" (reserve response).
+ */
+function normalizeReservationEndTime(value) {
+  if (value == null || value === '') return null;
+
+  const str = String(value).trim();
+  if (!str || str === '0') return null;
+
+  let d;
+  const mysqlMatch = str.match(/^(\d{4}-\d{2}-\d{2}) (\d{2}:\d{2})(?::(\d{2}))?(?:\.\d+)?$/);
+  if (mysqlMatch) {
+    const seconds = mysqlMatch[3] || '00';
+    d = new Date(`${mysqlMatch[1]}T${mysqlMatch[2]}:${seconds}Z`);
+  } else {
+    d = new Date(str);
+  }
+
+  if (Number.isNaN(d.getTime()) || d.getTime() <= 0) return null;
+  return d.toISOString();
+}
+
+/**
+ * Convert reservation end time to MariaDB TIMESTAMP format (YYYY-MM-DD HH:MM:SS).
+ */
+function toMySQLDateTime(value) {
+  const iso = normalizeReservationEndTime(value);
+  if (!iso) return null;
+  return iso.replace(/\.\d{3}Z$/, '').replace('T', ' ');
+}
+
+/**
  * Normalize point data from different providers
  */
 function normalizePoint(rawPoint, provider) {
@@ -169,7 +201,7 @@ function normalizePoint(rawPoint, provider) {
       location_name: p.locationName,
       connector: p.connector,
       address: p.address,
-      reservation_end_time: p.reservationendtime,
+      reservation_end_time: normalizeReservationEndTime(p.reservationendtime),
       price: null
     };
   }
@@ -186,7 +218,7 @@ function normalizePoint(rawPoint, provider) {
       connector: p.connectorType,
       location_name: p.locationName,
       address: p.address,
-      reservation_end_time: p.reservedUntil
+      reservation_end_time: normalizeReservationEndTime(p.reservedUntil)
     };
   }
 
@@ -202,7 +234,7 @@ function normalizePoint(rawPoint, provider) {
       location_name: p.locationName,
       connector: p.connector,
       address: p.address,
-      reservation_end_time: p.reservationEnd
+      reservation_end_time: normalizeReservationEndTime(p.reservationEnd)
     };
   }
 
@@ -212,5 +244,7 @@ function normalizePoint(rawPoint, provider) {
 module.exports = {
   PROVIDER_MAP,
   buildProviderUrl,
-  normalizePoint
+  normalizePoint,
+  normalizeReservationEndTime,
+  toMySQLDateTime
 };
