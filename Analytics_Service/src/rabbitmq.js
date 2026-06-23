@@ -250,10 +250,23 @@ async function connectWithRetry(maxRetries = 5, initialDelay = 2000) {
   }
 }
 
+function __testSetChannel(testChannel) {
+  channel = testChannel;
+}
+
+function __testResetChannel() {
+  channel = null;
+}
+
 module.exports = {
   connectRabbitMQ,
   connectWithRetry,
   closeConnection,
-  channel: () => channel
+  channel: () => channel,
+  __testSetChannel,
+  __testResetChannel,
+  handleUserRegisteredEvent,
+  handleProviderRegisteredEvent,
+  handleReservationCompletedEvent
 };
 
