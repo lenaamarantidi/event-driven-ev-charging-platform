@@ -45,7 +45,7 @@ export const providerAPI = {
     } catch (error) {
       return {
         success: false,
-        error: error.response?.data?.message || error.message
+        error: error.response?.data?.error || error.response?.data?.message || error.message
       };
     }
   },
@@ -86,7 +86,7 @@ export const providerAPI = {
     } catch (error) {
       return {
         success: false,
-        error: error.response?.data?.message || error.message
+        error: error.response?.data?.error || error.response?.data?.message || error.message
       };
     }
   },
@@ -458,10 +458,13 @@ export const pointsAPI = {
    * GET /api/points
    * Λήψη όλων των σημείων φόρτισης από τους adapters
    */
-  getAll: async () => {
+  getAll: async (params = {}) => {
     try {
       const api = createApiInstance(SERVICES.points);
-      const response = await api.get('', getAuthHeaders());
+      const response = await api.get('', {
+        ...getAuthHeaders(),
+        params
+      });
       return {
         success: true,
         data: response.data
@@ -471,6 +474,27 @@ export const pointsAPI = {
         success: false,
         error: error.response?.data?.message || error.message,
         data: { points: [] }
+      };
+    }
+  },
+
+  /**
+   * GET /api/points/:pointId
+   * Λήψη ενός σημείου φόρτισης για ανανέωση marker μετά από reservation
+   */
+  getById: async (pointId) => {
+    try {
+      const api = createApiInstance(SERVICES.points);
+      const response = await api.get(`/${pointId}`, getAuthHeaders());
+      return {
+        success: true,
+        data: response.data
+      };
+    } catch (error) {
+      return {
+        success: false,
+        error: error.response?.data?.error || error.response?.data?.message || error.message,
+        data: null
       };
     }
   }
@@ -501,7 +525,7 @@ export const reservationAPI = {
     } catch (error) {
       return {
         success: false,
-        error: error.response?.data?.message || error.message
+        error: error.response?.data?.error || error.response?.data?.message || error.message
       };
     }
   },

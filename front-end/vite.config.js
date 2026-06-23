@@ -18,7 +18,10 @@ export default defineConfig({
       '/api/points': {
         target: 'http://127.0.0.1:3001',
         changeOrigin: true,
-        rewrite: (path) => path.replace(/^\/api/, ''),
+      },
+      '/api/reserve': {
+        target: 'http://127.0.0.1:3009',
+        changeOrigin: true,
       },
       '/api/reservations': {
         target: 'http://127.0.0.1:3009',

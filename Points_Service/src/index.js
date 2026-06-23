@@ -102,6 +102,18 @@ async function fetchPointsFromAdapterBroker(plugKey) {
   }
 }
 
+async function fetchPointsFromAdapter(plugKey) {
+  if (ADAPTER_SYNC_TRANSPORT === 'broker') {
+    try {
+      return await fetchPointsFromAdapterBroker(plugKey);
+    } catch (err) {
+      console.warn(`[repopulate:${plugKey}] Broker sync failed, falling back to HTTP: ${err.message}`);
+    }
+  }
+
+  return fetchPointsFromAdapterHttp(plugKey);
+}
+
 function normalizeAdapterPoint(point, plugKey) {
   return {
     id: point.pointId ?? point.id ?? point.uid ?? point.chargerId ?? point.pointid,
@@ -176,11 +188,96 @@ const { normalizePoint } = require('./plugs_api');
 const { getAccessibleIps, getProviderNames } = require('./util');
 
 const reservationTimers = new Map();
+const RESERVATION_TIMEZONE = process.env.RESERVATION_TIMEZONE || 'Europe/Athens';
+
+// ============== SSE CLIENTS ==============
+const sseClients = new Set();
+
+function notifyPointUpdate(point) {
+  if (sseClients.size === 0) return;
+  const data = `data: ${JSON.stringify(point)}\n\n`;
+  for (const res of sseClients) {
+    try {
+      res.write(data);
+    } catch (_) {
+      sseClients.delete(res);
+    }
+  }
+}
+
+function getTimeZoneOffsetMs(timeZone, date) {
+  const parts = new Intl.DateTimeFormat('en-GB', {
+    timeZone,
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+    hour12: false
+  }).formatToParts(date).reduce((acc, part) => {
+    if (part.type !== 'literal') acc[part.type] = part.value;
+    return acc;
+  }, {});
+
+  const localAsUtc = Date.UTC(
+    Number(parts.year),
+    Number(parts.month) - 1,
+    Number(parts.day),
+    Number(parts.hour),
+    Number(parts.minute),
+    Number(parts.second)
+  );
+
+  return localAsUtc - date.getTime();
+}
+
+function parseReservationEndTime(reservationEndTime) {
+  if (reservationEndTime instanceof Date) {
+    return reservationEndTime.getTime();
+  }
+
+  if (typeof reservationEndTime !== 'string') {
+    const timestamp = new Date(reservationEndTime).getTime();
+    return Number.isNaN(timestamp) ? null : timestamp;
+  }
+
+  const trimmed = reservationEndTime.trim();
+
+  if (/Z$|[+-]\d{2}:?\d{2}$/.test(trimmed)) {
+    const timestamp = new Date(trimmed).getTime();
+    return Number.isNaN(timestamp) ? null : timestamp;
+  }
+
+  const match = trimmed.match(/^(\d{4})-(\d{2})-(\d{2})[ T](\d{2}):(\d{2})(?::(\d{2}))?$/);
+  if (!match) {
+    const timestamp = new Date(trimmed).getTime();
+    return Number.isNaN(timestamp) ? null : timestamp;
+  }
+
+  const [, year, month, day, hour, minute, second = '0'] = match;
+  const localAsUtc = Date.UTC(
+    Number(year),
+    Number(month) - 1,
+    Number(day),
+    Number(hour),
+    Number(minute),
+    Number(second)
+  );
+
+  const firstOffset = getTimeZoneOffsetMs(RESERVATION_TIMEZONE, new Date(localAsUtc));
+  const firstUtc = localAsUtc - firstOffset;
+  const finalOffset = getTimeZoneOffsetMs(RESERVATION_TIMEZONE, new Date(firstUtc));
+  return localAsUtc - finalOffset;
+}
 
 function scheduleReservationExpiry(pointId, reservationEndTime) {
   try {
     // Calculate remaining time in milliseconds
-    const endTime = new Date(reservationEndTime).getTime();
+    const endTime = parseReservationEndTime(reservationEndTime);
+    if (!endTime) {
+      throw new Error(`Invalid reservation end time: ${reservationEndTime}`);
+    }
     const now = new Date().getTime();
     const remainingMs = endTime - now;
 
@@ -189,44 +286,15 @@ function scheduleReservationExpiry(pointId, reservationEndTime) {
       clearTimeout(reservationTimers.get(pointId));
     }
 
-    // Set timer to update status when reservation expires
-    if (remainingMs > 0) {
+    // Set timer to update status when reservation expires. If the expiry is
+    // already in the past, run the expiry check immediately.
+    if (Number.isFinite(remainingMs)) {
+      const expiryDelayMs = Math.max(0, remainingMs + 60000);
       const timerId = setTimeout(async () => {
         try {
           console.log(`⏰ Reservation expired for point ${pointId}, updating status to available`);
 
-          // first get new point status from povider api
-          // Get point details from provider API
-          const service = process.env.SERVICE;
-          const s = String(service).toLowerCase();
-          
-          let plugKey;
-          if (s.includes('green')) plugKey = 'greenPlug';
-          else if (s.includes('red')) plugKey = 'redPlug';
-          else if (s.includes('blue')) plugKey = 'bluePlug';
-          else throw new Error('Unknown service');
-
-          const config = PROVIDER_MAP[plugKey];
-          const url = buildProviderUrl(plugKey, "detailPath", pointId);
-
-          const bearerToken = process.env.BEARER_TOKEN;
-          const headers = { Accept: 'application/json' };
-          if (bearerToken) {
-            headers.Authorization = `Bearer ${bearerToken}`;
-          }
-
-          const providerResp = await axios.get(url, {
-            timeout: 10000,
-            headers
-          });
-
-          const pointData = providerResp.data || {};
-          const normalized = normalizePoint(pointData, plugKey);
-          const currentStatus = normalized.status;
-
-          console.log(`📊 Point ${pointId} current status from provider: ${currentStatus}`);
-
-          // Query DB to get current point status
+          // Query DB first so central service can infer the provider for this point.
           const [dbRows] = await pointsMysql.query(
             'SELECT * FROM points WHERE point_id = ?',
             [pointId]
@@ -241,6 +309,48 @@ function scheduleReservationExpiry(pointId, reservationEndTime) {
           }
 
           const dbPoint = dbRows[0];
+
+          // first get new point status from provider api
+          // Get point details from provider API
+          const service = process.env.SERVICE;
+          const s = String(service).toLowerCase();
+          const providerName = String(dbPoint.provider_name || '').toLowerCase();
+          
+          let plugKey;
+          if (s.includes('green')) plugKey = 'greenPlug';
+          else if (s.includes('red')) plugKey = 'redPlug';
+          else if (s.includes('blue')) plugKey = 'bluePlug';
+          else if (providerName.includes('green')) plugKey = 'greenPlug';
+          else if (providerName.includes('red')) plugKey = 'redPlug';
+          else if (providerName.includes('blue')) plugKey = 'bluePlug';
+          else throw new Error(`Unknown service/provider for point ${pointId}`);
+
+          let currentStatus = 'available'; // Default fallback for expired reservations
+
+          try {
+            const config = PROVIDER_MAP[plugKey];
+            const url = buildProviderUrl(plugKey, "detailPath", pointId);
+
+            const bearerToken = process.env.BEARER_TOKEN;
+            const headers = { Accept: 'application/json' };
+            if (bearerToken) {
+              headers.Authorization = `Bearer ${bearerToken}`;
+            }
+
+            const providerResp = await axios.get(url, {
+              timeout: 10000,
+              headers
+            });
+
+            const pointData = providerResp.data || {};
+            const normalized = normalizePoint(pointData, plugKey);
+            currentStatus = normalized.status;
+
+            console.log(`📊 Point ${pointId} current status from provider: ${currentStatus}`);
+          } catch (providerErr) {
+            console.log(`⚠️ Could not fetch provider status for point ${pointId}: ${providerErr.message}. Using fallback status: available`);
+          }
+
           console.log(`📋 Point ${pointId} current status in DB: ${dbPoint.status}`);
           console.log(`📋 Point ${pointId} DB details:`, {
             status: dbPoint.status,
@@ -249,83 +359,94 @@ function scheduleReservationExpiry(pointId, reservationEndTime) {
           });
 
           reservationTimers.delete(pointId);
-          // Compare statuses
-          if (String(dbPoint.status) !== String(currentStatus)) {
-            console.log(`Expected status mismatch for point ${pointId}:`);
-            console.log(`   DB status: ${dbPoint.status}`);
-            console.log(`   Provider status: ${currentStatus}`);
-            console.log(`   Updating DB to match provider status`);
-            await pointsMysql.query(
+          
+          // Update DB to new status and clear reservation end time
+          console.log(`Updating point ${pointId} from ${dbPoint.status} to ${currentStatus}`);
+          try {
+            const updateResult = await pointsMysql.query(
               'UPDATE points SET status = ?, reservation_end_time = NULL, last_updated = CURRENT_TIMESTAMP WHERE point_id = ?',
               [String(currentStatus), pointId]
             );
+            console.log(`✓ Successfully updated point ${pointId} to status: ${currentStatus}`);
+
+            // Fetch fresh row and notify
+            try {
+              const [freshRows] = await pointsMysql.query('SELECT * FROM points WHERE point_id = ?', [pointId]);
+              if (freshRows.length > 0) {
+                console.log(`✓ Fetched fresh row for point ${pointId}, notifying SSE clients`);
+                notifyPointUpdate(freshRows[0]);
+              }
+            } catch (fetchErr) {
+              console.error(`❌ Error fetching fresh row for point ${pointId}:`, fetchErr.message);
+            }
+          } catch (updateErr) {
+            console.error(`❌ Error updating point ${pointId}:`, updateErr.message);
+            throw updateErr;
+          }
+
+          // Also update other services based on current service
+          const serviceEnv = process.env.SERVICE;
+          if (serviceEnv) {
+            const sEnv = String(serviceEnv).toLowerCase();
+            const portMap = {
+              red: process.env.POINTS_RED_PORT,
+              green: process.env.POINTS_GREEN_PORT,
+              blue: process.env.POINTS_BLUE_PORT
+            };
             
-            // Also update other services based on current service
-            const service = process.env.SERVICE;
-            if (service) {
-              const s = String(service).toLowerCase();
-              const portMap = {
-                red: process.env.POINTS_RED_PORT,
-                green: process.env.POINTS_GREEN_PORT,
-                blue: process.env.POINTS_BLUE_PORT
-              };
+            // Determine current plug
+            let currentPlug = null;
+            if (sEnv.includes('red')) currentPlug = 'red';
+            else if (sEnv.includes('green')) currentPlug = 'green';
+            else if (sEnv.includes('blue')) currentPlug = 'blue';
+            
+            // If current service is red/green/blue, also update central DB
+            if (currentPlug) {
+              try {
+                const centralPort = process.env.POINTS_CENTRAL_PORT;
+                if (centralPort) {
+                  const protocol = 'http';
+                  const serviceHost = 'host.docker.internal';
+                  const centralUrl = `${protocol}://${serviceHost}:${centralPort}${DB_POINT_UPDATE.replace(':pointId', pointId)}`;
+                  console.log(`[scheduleReservationExpiry] Also updating central DB at ${centralUrl}`);
+                  await axios.put(centralUrl, { status: currentStatus });
+                }
+              } catch (err) {
+                console.error(`[scheduleReservationExpiry] Failed to update central DB:`, err.message);
+              }
+            }
+            // If current service is central, find which plug the point belongs to and update that service
+            else if (sEnv.includes('central')) {
+              const pointProvider = dbPoint?.provider_name || '';
+              let targetPlug = null;
+              if (pointProvider.includes('red')) targetPlug = 'red';
+              else if (pointProvider.includes('green')) targetPlug = 'green';
+              else if (pointProvider.includes('blue')) targetPlug = 'blue';
               
-              // Determine current plug
-              let currentPlug = null;
-              if (s.includes('red')) currentPlug = 'red';
-              else if (s.includes('green')) currentPlug = 'green';
-              else if (s.includes('blue')) currentPlug = 'blue';
-              
-              // If current service is red/green/blue, also update central DB
-              if (currentPlug) {
-                try {
-                  const centralPort = process.env.POINTS_CENTRAL_PORT;
-                  if (centralPort) {
+              if (targetPlug) {
+                const targetPort = portMap[targetPlug];
+                if (targetPort) {
+                  try {
                     const protocol = 'http';
                     const serviceHost = 'host.docker.internal';
-                    const centralUrl = `${protocol}://${serviceHost}:${centralPort}${DB_POINT_UPDATE.replace(':pointId', pointId)}`;
-                    console.log(`[scheduleReservationExpiry] Also updating central DB at ${centralUrl}`);
-                    await axios.put(centralUrl, { status: currentStatus });
-                  }
-                } catch (err) {
-                  console.error(`[scheduleReservationExpiry] Failed to update central DB:`, err.message);
-                }
-              }
-              // If current service is central, find which plug the point belongs to and update that service
-              else if (s.includes('central')) {
-                const pointProvider = dbPoint?.provider_name || '';
-                let targetPlug = null;
-                if (pointProvider.includes('red')) targetPlug = 'red';
-                else if (pointProvider.includes('green')) targetPlug = 'green';
-                else if (pointProvider.includes('blue')) targetPlug = 'blue';
-                
-                if (targetPlug) {
-                  const targetPort = portMap[targetPlug];
-                  if (targetPort) {
-                    try {
-                      const protocol = 'http';
-                      const serviceHost = 'host.docker.internal';
-                      const targetUrl = `${protocol}://${serviceHost}:${targetPort}${DB_POINT_UPDATE.replace(':pointId', pointId)}`;
-                      console.log(`[scheduleReservationExpiry] Central service updating ${targetPlug} DB at ${targetUrl}`);
-                      await axios.put(targetUrl, { status: currentStatus });
-                    } catch (err) {
-                      console.error(`[scheduleReservationExpiry] Failed to update ${targetPlug} DB:`, err.message);
-                    }
+                    const targetUrl = `${protocol}://${serviceHost}:${targetPort}${DB_POINT_UPDATE.replace(':pointId', pointId)}`;
+                    console.log(`[scheduleReservationExpiry] Central service updating ${targetPlug} DB at ${targetUrl}`);
+                    await axios.put(targetUrl, { status: currentStatus });
+                  } catch (err) {
+                    console.error(`[scheduleReservationExpiry] Failed to update ${targetPlug} DB:`, err.message);
                   }
                 }
               }
             }
-          } else {
-            throw new Error(`Expected status mismatch for point ${pointId}, but DB and provider have same status: ${dbPoint.status}`);
           }
 
         } catch (err) {
           console.error(`Error updating expired reservation for ${pointId}:`, err.message);
         }
-      }, remainingMs+60000); // add 1 minute because reservation end time does not take into account remaining seconds in the last minute, so we add a buffer to ensure the reservation has actually expired in the provider system before we update our DB.
+      }, expiryDelayMs); // add 1 minute because reservation end time does not take into account remaining seconds in the last minute, so we add a buffer to ensure the reservation has actually expired in the provider system before we update our DB.
 
       reservationTimers.set(pointId, timerId);
-      console.log(`⏱️ Timer scheduled for point ${pointId}, expires in ${Math.floor(remainingMs / 1000)} seconds`);
+      console.log(`⏱️ Timer scheduled for point ${pointId}, expires in ${Math.floor(remainingMs / 1000)} seconds (${RESERVATION_TIMEZONE})`);
     }
 
     return remainingMs;
@@ -495,11 +616,7 @@ async function repopulate(service, filterIds = null) {
 
   let rawPoints;
 
-  if (ADAPTER_SYNC_TRANSPORT === 'broker') {
-    rawPoints = await fetchPointsFromAdapterBroker(plugKey);
-  } else {
-    rawPoints = await fetchPointsFromAdapterHttp(plugKey);
-  }
+  rawPoints = await fetchPointsFromAdapter(plugKey);
 
   if (!Array.isArray(rawPoints)) {
     throw new Error('Provider response did not contain an array of points');
@@ -610,9 +727,7 @@ async function repopulate_central(req) {
   for (const provider of providers) {
 
     try {
-      const points = ADAPTER_SYNC_TRANSPORT === 'broker'
-        ? await fetchPointsFromAdapterBroker(provider)
-        : await fetchPointsFromAdapterHttp(provider);
+      const points = await fetchPointsFromAdapter(provider);
 
       console.log(`[repopulate_central] Got ${points.length} points from ${provider} adapter`);
       if (points.length > 0) {
@@ -789,6 +904,7 @@ app.put(DB_POINT_UPDATE, async (req, res) => {
       [pointId]
     );
 
+    notifyPointUpdate(updatedRows[0]);
     return res.json({
       message: 'Point updated successfully',
       point: updatedRows[0]
@@ -805,6 +921,87 @@ const PDF_ALLOWED_STATUSES = (process.env.PDF_ALLOWED_STATUSES || 'available,cha
   .split(',')
   .map(s => s.trim())
   .filter(Boolean);
+
+const ALLOWED_AVAIL_FILTERS = ['available', 'occupied', 'unavailable'];
+const AVAIL_STATUS_MAP = {
+  available: ['available'],
+  occupied: ['charging', 'reserved', 'occupied', 'held'],
+  unavailable: ['offline', 'malfunction']
+};
+
+// Connector type mapping from numeric codes to semantic names
+const CONNECTOR_TYPE_MAP = {
+  '3': 'Type 3',
+  '7': 'CHAdeMO',
+  '20': 'Type 2',
+  '24': 'CCS2',
+  'null': 'Other'
+};
+
+const ALLOWED_CONNECTOR_TYPES = ['Type 2', 'Type 3', 'CHAdeMO', 'CCS2', 'Other'];
+const ALLOWED_CHARGER_TYPES = ['AC', 'DC'];
+
+function parseAvailFilters(rawAvail) {
+  if (rawAvail === undefined || rawAvail === null || rawAvail === '') {
+    return [];
+  }
+
+  const tokens = Array.isArray(rawAvail)
+    ? rawAvail
+    : String(rawAvail).split(',');
+
+  return [...new Set(tokens.map((t) => String(t).trim().toLowerCase()).filter(Boolean))];
+}
+
+function statusesFromAvailFilters(availFilters) {
+  const statuses = availFilters.flatMap((a) => AVAIL_STATUS_MAP[a] || []);
+  return [...new Set(statuses)];
+}
+
+function parseConnectorTypeFilters(rawConnectorType) {
+  if (rawConnectorType === undefined || rawConnectorType === null || rawConnectorType === '') {
+    return [];
+  }
+
+  const tokens = Array.isArray(rawConnectorType)
+    ? rawConnectorType
+    : String(rawConnectorType).split(',');
+
+  return [...new Set(tokens.map((t) => String(t).trim()).filter(Boolean))];
+}
+
+function connectorCodesToMatch(connectorTypeFilters) {
+  if (connectorTypeFilters.length === 0) {
+    return [];
+  }
+
+  const codes = Object.entries(CONNECTOR_TYPE_MAP)
+    .filter(([code, name]) => connectorTypeFilters.includes(name))
+    .map(([code, name]) => code);
+
+  return [...new Set(codes)];
+}
+
+function parseNumericFilter(rawValue) {
+  if (rawValue === undefined || rawValue === null || rawValue === '') {
+    return null;
+  }
+
+  const parsed = Number(rawValue);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+function parseChargerTypeFilters(rawType) {
+  if (rawType === undefined || rawType === null || rawType === '') {
+    return [];
+  }
+
+  const tokens = Array.isArray(rawType)
+    ? rawType
+    : String(rawType).split(',');
+
+  return [...new Set(tokens.map((t) => String(t).trim().toUpperCase()).filter(Boolean))];
+}
 
 function formatDateTimeForPdf(value) {
   const d = value ? new Date(value) : new Date();
@@ -859,8 +1056,48 @@ function mapPointDetailPdf(row) {
 app.get(API_POINTS, async (req, res) => {
 
   try {
-    const { provider, status, lat, lon, radius, limit } = req.query;
+    const { provider, status, avail, connectorType, lat, lon, radius, limit, costMin, costMax, powerMin, powerMax, type } = req.query;
     const safeLimit = limit !== undefined ? Number(limit) : undefined;
+    const parsedAvail = parseAvailFilters(avail);
+    const parsedConnectorType = parseConnectorTypeFilters(connectorType);
+    const parsedType = parseChargerTypeFilters(type);
+    const safeCostMin = parseNumericFilter(costMin);
+    const safeCostMax = parseNumericFilter(costMax);
+    const safePowerMin = parseNumericFilter(powerMin);
+    const safePowerMax = parseNumericFilter(powerMax);
+
+    const invalidAvail = parsedAvail.filter((a) => !ALLOWED_AVAIL_FILTERS.includes(a));
+    if (invalidAvail.length > 0) {
+      return res.status(400).json({
+        error: `Invalid avail filter(s): ${invalidAvail.join(', ')}. Allowed values: ${ALLOWED_AVAIL_FILTERS.join(', ')}`
+      });
+    }
+
+    const invalidConnectorTypes = parsedConnectorType.filter((ct) => !ALLOWED_CONNECTOR_TYPES.includes(ct));
+    if (invalidConnectorTypes.length > 0) {
+      return res.status(400).json({
+        error: `Invalid connectorType filter(s): ${invalidConnectorTypes.join(', ')}. Allowed values: ${ALLOWED_CONNECTOR_TYPES.join(', ')}`
+      });
+    }
+
+    const invalidTypes = parsedType.filter((chargerType) => !ALLOWED_CHARGER_TYPES.includes(chargerType));
+    if (invalidTypes.length > 0) {
+      return res.status(400).json({
+        error: `Invalid type filter(s): ${invalidTypes.join(', ')}. Allowed values: ${ALLOWED_CHARGER_TYPES.join(', ')}`
+      });
+    }
+
+    if (safeCostMin !== null && safeCostMax !== null && safeCostMin > safeCostMax) {
+      return res.status(400).json({ error: 'Invalid cost range: costMin cannot be greater than costMax' });
+    }
+
+    if (safePowerMin !== null && safePowerMax !== null && safePowerMin > safePowerMax) {
+      return res.status(400).json({ error: 'Invalid power range: powerMin cannot be greater than powerMax' });
+    }
+
+    const availStatuses = statusesFromAvailFilters(parsedAvail);
+    const connectorCodes = connectorCodesToMatch(parsedConnectorType);
+    const chargerTypes = parsedType;
 
     // Debug: check if database is accessible and has data
     const [countRows] = await pointsMysql.query('SELECT COUNT(*) as count FROM points');
@@ -878,6 +1115,45 @@ app.get(API_POINTS, async (req, res) => {
     if (status) {
       query += ' AND status = ?';
       params.push(status);
+    }
+
+    if (availStatuses.length > 0) {
+      query += ` AND status IN (${availStatuses.map(() => '?').join(', ')})`;
+      params.push(...availStatuses);
+    }
+
+    if (connectorCodes.length > 0) {
+      query += ` AND connector IN (${connectorCodes.map(() => '?').join(', ')})`;
+      params.push(...connectorCodes);
+    }
+
+    if (safeCostMin !== null) {
+      query += ' AND kwh_price >= ?';
+      params.push(safeCostMin);
+    }
+
+    if (safeCostMax !== null) {
+      query += ' AND kwh_price <= ?';
+      params.push(safeCostMax);
+    }
+
+    if (safePowerMin !== null) {
+      query += ' AND capacity_kw >= ?';
+      params.push(safePowerMin);
+    }
+
+    if (safePowerMax !== null) {
+      query += ' AND capacity_kw <= ?';
+      params.push(safePowerMax);
+    }
+
+    if (chargerTypes.length > 0) {
+      const typeClauses = chargerTypes.map((chargerType) => {
+        return chargerType === 'AC'
+          ? '(capacity_kw IS NOT NULL AND capacity_kw <= 22)'
+          : '(capacity_kw IS NOT NULL AND capacity_kw > 22)';
+      });
+      query += ` AND (${typeClauses.join(' OR ')})`;
     }
 
     if (lat && lon && radius) {
@@ -914,8 +1190,48 @@ app.get(API_POINTS, async (req, res) => {
 
 app.get('/points', async (req, res) => {
   try {
-    const { provider, status, lat, lon, radius, limit } = req.query;
+    const { provider, status, avail, connectorType, lat, lon, radius, limit, costMin, costMax, powerMin, powerMax, type } = req.query;
     const safeLimit = limit !== undefined ? Number(limit) : undefined;
+    const parsedAvail = parseAvailFilters(avail);
+    const parsedConnectorType = parseConnectorTypeFilters(connectorType);
+    const parsedType = parseChargerTypeFilters(type);
+    const safeCostMin = parseNumericFilter(costMin);
+    const safeCostMax = parseNumericFilter(costMax);
+    const safePowerMin = parseNumericFilter(powerMin);
+    const safePowerMax = parseNumericFilter(powerMax);
+
+    const invalidAvail = parsedAvail.filter((a) => !ALLOWED_AVAIL_FILTERS.includes(a));
+    if (invalidAvail.length > 0) {
+      return res.status(400).json({
+        error: `Invalid avail filter(s): ${invalidAvail.join(', ')}. Allowed values: ${ALLOWED_AVAIL_FILTERS.join(', ')}`
+      });
+    }
+
+    const invalidConnectorTypes = parsedConnectorType.filter((ct) => !ALLOWED_CONNECTOR_TYPES.includes(ct));
+    if (invalidConnectorTypes.length > 0) {
+      return res.status(400).json({
+        error: `Invalid connectorType filter(s): ${invalidConnectorTypes.join(', ')}. Allowed values: ${ALLOWED_CONNECTOR_TYPES.join(', ')}`
+      });
+    }
+
+    const invalidTypes = parsedType.filter((chargerType) => !ALLOWED_CHARGER_TYPES.includes(chargerType));
+    if (invalidTypes.length > 0) {
+      return res.status(400).json({
+        error: `Invalid type filter(s): ${invalidTypes.join(', ')}. Allowed values: ${ALLOWED_CHARGER_TYPES.join(', ')}`
+      });
+    }
+
+    if (safeCostMin !== null && safeCostMax !== null && safeCostMin > safeCostMax) {
+      return res.status(400).json({ error: 'Invalid cost range: costMin cannot be greater than costMax' });
+    }
+
+    if (safePowerMin !== null && safePowerMax !== null && safePowerMin > safePowerMax) {
+      return res.status(400).json({ error: 'Invalid power range: powerMin cannot be greater than powerMax' });
+    }
+
+    const availStatuses = statusesFromAvailFilters(parsedAvail);
+    const connectorCodes = connectorCodesToMatch(parsedConnectorType);
+    const chargerTypes = parsedType;
 
     if (status && !PDF_ALLOWED_STATUSES.includes(String(status))) {
       return res.status(400).json({
@@ -934,6 +1250,45 @@ app.get('/points', async (req, res) => {
     if (status) {
       query += ' AND status = ?';
       params.push(status);
+    }
+
+    if (availStatuses.length > 0) {
+      query += ` AND status IN (${availStatuses.map(() => '?').join(', ')})`;
+      params.push(...availStatuses);
+    }
+
+    if (connectorCodes.length > 0) {
+      query += ` AND connector IN (${connectorCodes.map(() => '?').join(', ')})`;
+      params.push(...connectorCodes);
+    }
+
+    if (safeCostMin !== null) {
+      query += ' AND kwh_price >= ?';
+      params.push(safeCostMin);
+    }
+
+    if (safeCostMax !== null) {
+      query += ' AND kwh_price <= ?';
+      params.push(safeCostMax);
+    }
+
+    if (safePowerMin !== null) {
+      query += ' AND capacity_kw >= ?';
+      params.push(safePowerMin);
+    }
+
+    if (safePowerMax !== null) {
+      query += ' AND capacity_kw <= ?';
+      params.push(safePowerMax);
+    }
+
+    if (chargerTypes.length > 0) {
+      const typeClauses = chargerTypes.map((chargerType) => {
+        return chargerType === 'AC'
+          ? '(capacity_kw IS NOT NULL AND capacity_kw <= 22)'
+          : '(capacity_kw IS NOT NULL AND capacity_kw > 22)';
+      });
+      query += ` AND (${typeClauses.join(' OR ')})`;
     }
 
     if (lat && lon && radius) {
@@ -959,6 +1314,38 @@ app.get('/points', async (req, res) => {
     console.error('Error fetching points:', err.message);
     res.status(500).json({ error: 'Failed to fetch points' });
   }
+});
+
+/**
+ * GET /api/points/events
+ * Server-Sent Events stream for real-time point status updates.
+ * Must be registered BEFORE the :pointId wildcard route.
+ */
+app.get('/api/points/events', (req, res) => {
+  res.set({
+    'Content-Type': 'text/event-stream',
+    'Cache-Control': 'no-cache',
+    'Connection': 'keep-alive',
+    'X-Accel-Buffering': 'no',
+  });
+  res.flushHeaders();
+  res.write(': connected\n\n');
+
+  sseClients.add(res);
+
+  const keepalive = setInterval(() => {
+    try {
+      res.write(': keepalive\n\n');
+    } catch (_) {
+      clearInterval(keepalive);
+      sseClients.delete(res);
+    }
+  }, 25000);
+
+  req.on('close', () => {
+    clearInterval(keepalive);
+    sseClients.delete(res);
+  });
 });
 
 /**
@@ -1129,6 +1516,11 @@ const { pointId } = req.params;
       throw dbErr;
     }
 
+    try {
+      const [freshRows] = await pointsMysql.query('SELECT * FROM points WHERE point_id = ?', [pointId]);
+      if (freshRows.length > 0) notifyPointUpdate(freshRows[0]);
+    } catch (_) {}
+
     console.log(`✓ Point ${pointId} reserved successfully, status updated to ${newStatus} in ${service} DB`);
 
     const remainingMs = scheduleReservationExpiry(pointId, reservationEndTime);
@@ -1269,6 +1661,25 @@ function scheduleDataSync() {
   }, 60000); // Check every minute
 }
 
+async function recoverReservationExpiryTimers() {
+  try {
+    const [rows] = await pointsMysql.query(
+      `SELECT point_id, DATE_FORMAT(reservation_end_time, '%Y-%m-%d %H:%i:%s') AS reservation_end_time
+       FROM points
+       WHERE status IN ('reserved', 'held')
+         AND reservation_end_time IS NOT NULL`
+    );
+
+    for (const row of rows) {
+      scheduleReservationExpiry(row.point_id, row.reservation_end_time);
+    }
+
+    console.log(`✓ Recovered ${rows.length} reservation expiry timers`);
+  } catch (err) {
+    console.error('✗ Failed to recover reservation expiry timers:', err.message);
+  }
+}
+
 // ============== SERVER START ==============
 
 const PORT = process.env.PORT || 3001;
@@ -1277,8 +1688,9 @@ let server = null;
 
 async function startServer() {
   try {
-    setDependencies({ db: pointsMysql, scheduleReservationExpiry });
+    setDependencies({ db: pointsMysql, scheduleReservationExpiry, notifyPointUpdate });
     await connectRabbitMQ();
+    await recoverReservationExpiryTimers();
     
     // Initialize scheduled sync for automatic data updates (1-2x per day)
     scheduleDataSync();

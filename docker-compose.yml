@@ -231,6 +231,7 @@ services:
       ADAPTER_SYNC_TRANSPORT: broker
       ADAPTER_SYNC_REQUEST_EXCHANGE: adapter.sync.requests
       POINTS_RPC_EXCHANGE: points.rpc
+      RESERVATION_TIMEZONE: Europe/Athens
     depends_on:
       rabbitmq:
         condition: service_healthy
