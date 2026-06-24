@@ -12,10 +12,8 @@ const { publishInvoiceCreated } = require('./rabbitmq');
 
 const ANALYTICS_SERVICE_URL = process.env.ANALYTICS_SERVICE_URL || 'http://localhost:3102';
 const MESSAGE_BROKER_URL = process.env.MESSAGE_BROKER_URL || 'http://localhost:3003';
-const BILLING_SERVICE_URL = process.env.BILLING_SERVICE_URL || 'http://localhost:3103';
+const PAYMENT_SERVICE_URL = process.env.PAYMENT_SERVICE_URL || 'http://localhost:3107';
 const BROKER_SERVICE_ID = process.env.BROKER_SERVICE_ID || 'billing-service';
-const BROKER_PAYMENT_WEBHOOK_PATH = process.env.BROKER_PAYMENT_WEBHOOK_PATH || '/api/webhooks/payment-processed';
-const BROKER_PAYMENT_WEBHOOK_URL = `${BILLING_SERVICE_URL}${BROKER_PAYMENT_WEBHOOK_PATH}`;
 const MONTHLY_FEE_DEFAULT = 15.00;
 const RESERVATION_PRICE_DEFAULT = 0.10;
 const PAYMENT_TERMS_DAYS = Number(process.env.PAYMENT_TERMS_DAYS || 30);
@@ -47,12 +45,6 @@ function getBillingPeriodByDate(date) {
     periodEnd: formatDate(endDate),
     nextPeriodStart: formatDate(nextMonthStart)
   };
-}
-
-function getPreviousBillingPeriod() {
-  const today = new Date();
-  const prevMonth = new Date(Date.UTC(today.getFullYear(), today.getMonth() - 1, 1));
-  return getBillingPeriodByDate(prevMonth);
 }
 
 async function getProviderPricing(providerId) {
@@ -91,26 +83,6 @@ async function fetchBillingStats(providerId, billingPeriodStart, billingPeriodEn
   } catch (err) {
     console.error('Error fetching billing stats from Analytics Service:', err.message);
     throw err;
-  }
-}
-
-async function publishBrokerEvent(eventType, data) {
-  try {
-    await axios.post(
-      `${MESSAGE_BROKER_URL}/api/events/publish`,
-      {
-        eventType,
-        data: {
-          ...data,
-          sourceService: BROKER_SERVICE_ID
-        }
-      },
-      { timeout: 5000 }
-    );
-    return true;
-  } catch (err) {
-    console.error(`Failed to publish broker event ${eventType}:`, err.message);
-    return false;
   }
 }
 
@@ -734,69 +706,50 @@ async function processPayment(req, res) {
     // Check if overdue
     const isOverdue = new Date() > new Date(invoice.due_date);
 
-    // Update invoice status to paid
-    await pool.query(
-      'UPDATE invoices SET status = ?, paid_at = CURRENT_TIMESTAMP WHERE invoice_id = ?',
-      ['PAID', parsedInvoiceId]
-    );
-
-    // Create payment record (idempotent for same invoice)
+    // Call Payment Service to create placeholder payment and publish event
+    let paymentCreated = false;
     try {
-      await pool.query(
-        `INSERT INTO payment_history (invoice_id, provider_id, amount, payment_method, reference, status, notes, paid_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)`,
-        [
-          parsedInvoiceId,
-          parsedProviderId,
-          invoice.total_amount,
+      await axios.post(
+        `${PAYMENT_SERVICE_URL}/api/payments`,
+        {
+          invoice_id: parsedInvoiceId,
+          provider_id: parsedProviderId,
+          amount: parseFloat(invoice.total_amount),
+          status: 'paid',
           paymentMethod,
-          reference || null,
-          'completed',
-          notes || null
-        ]
+          reference: reference || null,
+          notes: notes || null
+        },
+        { timeout: 8000 }
       );
+      paymentCreated = true;
     } catch (e) {
-      // If payment_history exists but duplicate insert happens, ignore.
-      if (e && (e.code === 'ER_DUP_ENTRY' || String(e.message || '').toLowerCase().includes('duplicate'))) {
-        console.log('Duplicate payment_history insert ignored');
-      } else {
-        console.warn('Failed to insert payment_history record:', e.message);
-      }
+      console.warn('Payment Service call failed:', e.message);
     }
 
-    // Publish payment processed event to broker
-    await publishBrokerEvent('payment.processed', {
-      invoiceId: parsedInvoiceId,
-      providerId: parsedProviderId,
-      amount: parseFloat(invoice.total_amount),
-      currency: 'EUR',
-      paymentMethod,
-      reference: reference || null,
-      notes: notes || null
-    });
-
-    const [updatedInvoices] = await pool.query(
-      'SELECT * FROM invoices WHERE invoice_id = ?',
-      [parsedInvoiceId]
-    );
-
-    const updatedInvoice = updatedInvoices[0];
+    if (!paymentCreated) {
+      return res.status(502).json({
+        success: false,
+        error: 'Payment Service unavailable',
+        message: 'Could not forward payment request to Payment Service'
+      });
+    }
 
     return res.json({
       success: true,
-      message: 'Payment processed successfully',
+      message: 'Payment request forwarded to Payment Service',
       invoice: {
-        invoice_id: updatedInvoice.invoice_id,
-        provider_id: updatedInvoice.provider_id,
-        amount: parseFloat(updatedInvoice.grand_total || updatedInvoice.total_amount),
+        invoice_id: invoice.invoice_id,
+        provider_id: invoice.provider_id,
+        amount: parseFloat(invoice.grand_total || invoice.total_amount),
         currency: 'EUR',
-        status: updatedInvoice.status,
+        status: invoice.status,
         payment_method: paymentMethod,
         reference: reference || null,
-        paid_at: new Date(updatedInvoice.paid_at).toLocaleString('el-GR', { timeZone: 'Europe/Athens', hour12: false }),
+        paid_at: null,
         was_overdue: isOverdue
       },
-      timestamp: new Date().toLocaleString('el-GR', { timeZone: 'Europe/Athens', hour12: false })
+      timestamp: new Date().toISOString()
     });
 
   } catch (err) {
@@ -1063,6 +1016,5 @@ module.exports = {
   refreshCurrentUsageForAllProviders,
   generateMonthlyInvoicesForAllProviders,
   scheduleDailyBillingTasks,
-  subscribeToBrokerEvent,
-  publishBrokerEvent
+  subscribeToBrokerEvent
 };

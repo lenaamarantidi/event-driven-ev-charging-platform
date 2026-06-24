@@ -35,13 +35,35 @@ async function initializeDatabase() {
     CREATE TABLE IF NOT EXISTS Payment (
       payment_id INT(10) UNSIGNED PRIMARY KEY AUTO_INCREMENT,
       invoice_id INT(10) UNSIGNED,
+      provider_id INT(10) UNSIGNED,
       amount DECIMAL(10,2),
+      payment_method VARCHAR(100) NULL,
+      reference VARCHAR(255) NULL,
+      notes VARCHAR(500) NULL,
       status VARCHAR(255),
       paid_at TIMESTAMP NULL DEFAULT NULL,
       INDEX idx_payment_invoice (invoice_id),
+      INDEX idx_payment_provider (provider_id),
       INDEX idx_payment_status (status),
       INDEX idx_payment_paid_at (paid_at)
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+  `);
+
+  await pool.query(`
+    ALTER TABLE Payment
+      ADD COLUMN IF NOT EXISTS provider_id INT(10) UNSIGNED AFTER invoice_id;
+  `);
+  await pool.query(`
+    ALTER TABLE Payment
+      ADD COLUMN IF NOT EXISTS payment_method VARCHAR(100) NULL AFTER amount;
+  `);
+  await pool.query(`
+    ALTER TABLE Payment
+      ADD COLUMN IF NOT EXISTS reference VARCHAR(255) NULL AFTER payment_method;
+  `);
+  await pool.query(`
+    ALTER TABLE Payment
+      ADD COLUMN IF NOT EXISTS notes VARCHAR(500) NULL AFTER reference;
   `);
 }
 
@@ -90,19 +112,31 @@ app.get('/', (req, res) => {
 
 app.post('/api/payments', async (req, res) => {
   try {
-    const { invoice_id, amount, status } = req.body;
+    const invoiceId = toInt(req.body.invoice_id ?? req.body.invoiceId);
+    const providerId = toInt(req.body.provider_id ?? req.body.providerId);
+    const amount = toDecimal(req.body.amount);
+    const status = req.body.status || 'pending';
+    const paymentMethod = req.body.paymentMethod || req.body.payment_method || 'bank_transfer';
+    const reference = req.body.reference || null;
+    const notes = req.body.notes || null;
 
-    const normalizedStatus = status || 'pending';
+    if (!invoiceId || !providerId) {
+      return res.status(400).json({
+        error: 'invoice_id and provider_id are required'
+      });
+    }
+
+    const normalizedStatus = status.toString();
     const paidAt = normalizedStatus === 'paid' ? new Date() : null;
 
     const [result] = await pool.query(
-      `INSERT INTO Payment (invoice_id, amount, status, paid_at)
-       VALUES (?, ?, ?, ?)`,
-      [toInt(invoice_id), toDecimal(amount), normalizedStatus, paidAt]
+      `INSERT INTO Payment (invoice_id, provider_id, amount, payment_method, reference, notes, status, paid_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+      [invoiceId, providerId, amount, paymentMethod, reference, notes, normalizedStatus, paidAt]
     );
 
     const [rows] = await pool.query(
-      `SELECT payment_id, invoice_id, amount, status, paid_at
+      `SELECT payment_id, invoice_id, provider_id, amount, payment_method, reference, notes, status, paid_at
        FROM Payment
        WHERE payment_id = ?`,
       [result.insertId]
@@ -114,10 +148,13 @@ app.post('/api/payments', async (req, res) => {
       await publishEvent('payment.processed', {
         paymentId: payment.payment_id,
         invoiceId: payment.invoice_id,
-        providerId: req.body.provider_id ?? req.body.providerId,
+        providerId: payment.provider_id,
         amount: Number(payment.amount || 0),
         currency: 'EUR',
         status: payment.status,
+        paymentMethod: payment.payment_method,
+        reference: payment.reference,
+        notes: payment.notes,
         paidAt: payment.paid_at
       });
     }
@@ -137,7 +174,7 @@ app.post('/api/payments', async (req, res) => {
 app.get('/api/payments/:paymentId', async (req, res) => {
   try {
     const [rows] = await pool.query(
-      `SELECT payment_id, invoice_id, amount, status, paid_at
+      `SELECT payment_id, invoice_id, provider_id, amount, payment_method, reference, notes, status, paid_at
        FROM Payment
        WHERE payment_id = ?`,
       [toInt(req.params.paymentId)]
@@ -161,7 +198,7 @@ app.get('/api/payments', async (req, res) => {
     const { invoice_id, status, limit = 100, offset = 0 } = req.query;
 
     let query = `
-      SELECT payment_id, invoice_id, amount, status, paid_at
+      SELECT payment_id, invoice_id, provider_id, amount, payment_method, reference, notes, status, paid_at
       FROM Payment
       WHERE 1=1
     `;
@@ -212,7 +249,7 @@ app.post('/api/payments/:paymentId/status', async (req, res) => {
     );
 
     const [rows] = await pool.query(
-      `SELECT payment_id, invoice_id, amount, status, paid_at
+      `SELECT payment_id, invoice_id, provider_id, amount, payment_method, reference, notes, status, paid_at
        FROM Payment
        WHERE payment_id = ?`,
       [paymentId]
@@ -228,9 +265,12 @@ app.post('/api/payments/:paymentId/status', async (req, res) => {
       await publishEvent('payment.processed', {
         paymentId: payment.payment_id,
         invoiceId: payment.invoice_id,
-        providerId: req.body.provider_id ?? req.body.providerId,
+        providerId: payment.provider_id,
         amount: Number(payment.amount || 0),
         currency: 'EUR',
+        paymentMethod: payment.payment_method,
+        reference: payment.reference,
+        notes: payment.notes,
         status: payment.status,
         paidAt: payment.paid_at
       });
