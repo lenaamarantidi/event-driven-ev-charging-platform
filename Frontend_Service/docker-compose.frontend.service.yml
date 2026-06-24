@@ -7,6 +7,10 @@ services:
     environment:
       PORT: ${FRONTEND_SERVICE_PORT}
       NODE_ENV: production
+      POINTS_CENTRAL_PORT: ${POINTS_CENTRAL_PORT}
+      POINTS_RED_PORT: ${POINTS_RED_PORT}
+      POINTS_GREEN_PORT: ${POINTS_GREEN_PORT}
+      POINTS_BLUE_PORT: ${POINTS_BLUE_PORT}
     command: node src/index.js
     volumes:
       - frontend-service-data:/app/data

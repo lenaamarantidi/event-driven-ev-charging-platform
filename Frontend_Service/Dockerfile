@@ -2,11 +2,15 @@ FROM node:18-alpine
 
 WORKDIR /app
 
-COPY package*.json ./
+COPY Frontend_Service/package*.json ./
 
 RUN npm install --omit=dev
 
-COPY . .
+COPY Frontend_Service/src ./src
+COPY Frontend_Service/pages ./pages
+
+# Copy plugs_api.js from Points_Service for normalization functions
+COPY Points_Service/src/plugs_api.js ./src/plugs_api.js
 
 EXPOSE 3000
 
