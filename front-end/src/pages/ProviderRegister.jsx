@@ -4,8 +4,12 @@ import { providerAPI } from '../utils/apiClient';
 const ProviderRegister = ({ onRegistered }) => {
   const [formData, setFormData] = useState({
     provider_name: '',
+    provider_email: '',
+    company_tin: '',
+    password: '',
     base_url: '',
     api_key: '',
+    openapi_url: '',
     endpoint_list_points: '',
     endpoint_point_details: '',
     endpoint_reserve: '',
@@ -41,7 +45,7 @@ const ProviderRegister = ({ onRegistered }) => {
       } else {
         setError(result.error || 'Registration failed. Please try again.');
       }
-    } catch (err) {
+    } catch {
       setError('An error occurred. Please try again.');
     } finally {
       setLoading(false);
@@ -130,16 +134,79 @@ const ProviderRegister = ({ onRegistered }) => {
                   />
                 </div>
 
+                <div className="mb-3">
+                  <label className="form-label">
+                    Company Email <span className="text-danger">*</span>
+                  </label>
+                  <input
+                    type="email"
+                    className="form-control"
+                    name="provider_email"
+                    value={formData.provider_email}
+                    onChange={handleChange}
+                    placeholder="billing@example.com"
+                    required
+                  />
+                </div>
+
+                <div className="mb-3">
+                  <label className="form-label">
+                    Company TIN <span className="text-danger">*</span>
+                  </label>
+                  <input
+                    type="text"
+                    className="form-control"
+                    name="company_tin"
+                    value={formData.company_tin}
+                    onChange={handleChange}
+                    placeholder="9 digits"
+                    required
+                  />
+                </div>
+
+                <div className="mb-3">
+                  <label className="form-label">
+                    Password <span className="text-danger">*</span>
+                  </label>
+                  <input
+                    type="password"
+                    className="form-control"
+                    name="password"
+                    value={formData.password}
+                    onChange={handleChange}
+                    minLength={8}
+                    required
+                  />
+                </div>
+
                 <hr className="my-4" />
 
                 <h5 className="mb-3 text-muted">API Configuration</h5>
                 <p className="small text-muted mb-3">
-                  Enter your API credentials to allow saasCharge to communicate with your charging network.
+                  Enter your API credentials and OpenAPI YAML URL to allow saasCharge to discover your charging network endpoints.
                 </p>
 
                 <div className="mb-3">
                   <label className="form-label">
-                    Base URL <span className="text-danger">*</span>
+                    OpenAPI YAML URL <span className="text-danger">*</span>
+                  </label>
+                  <input
+                    type="url"
+                    className="form-control"
+                    name="openapi_url"
+                    value={formData.openapi_url}
+                    onChange={handleChange}
+                    placeholder="e.g., https://api.davinci-charging.com/openapi.yaml"
+                    required
+                  />
+                  <div className="form-text">
+                    The OpenAPI YAML file that describes your provider API.
+                  </div>
+                </div>
+
+                <div className="mb-3">
+                  <label className="form-label">
+                    Base URL fallback
                   </label>
                   <input
                     type="url"
@@ -148,10 +215,9 @@ const ProviderRegister = ({ onRegistered }) => {
                     value={formData.base_url}
                     onChange={handleChange}
                     placeholder="e.g., https://api.davinci-charging.com"
-                    required
                   />
                   <div className="form-text">
-                    The base URL of your provider's API server
+                    Optional if the YAML includes servers[0].url.
                   </div>
                 </div>
 
@@ -175,15 +241,15 @@ const ProviderRegister = ({ onRegistered }) => {
 
                 <hr className="my-4" />
 
-                <h5 className="mb-3 text-muted">API Endpoints</h5>
+                <h5 className="mb-3 text-muted">Manual Endpoint Fallbacks</h5>
                 <p className="small text-muted mb-3">
-                  Specify the endpoint paths for each operation.
+                  Optional overrides if endpoint discovery from the OpenAPI YAML is incomplete.
                 </p>
 
                 <div className="row">
                   <div className="col-md-6 mb-3">
                     <label className="form-label">
-                      List Points Endpoint <span className="text-danger">*</span>
+                      List Points Endpoint
                     </label>
                     <input
                       type="text"
@@ -192,13 +258,12 @@ const ProviderRegister = ({ onRegistered }) => {
                       value={formData.endpoint_list_points}
                       onChange={handleChange}
                       placeholder="/api/points"
-                      required
                     />
                   </div>
 
                   <div className="col-md-6 mb-3">
                     <label className="form-label">
-                      Point Details Endpoint <span className="text-danger">*</span>
+                      Point Details Endpoint
                     </label>
                     <input
                       type="text"
@@ -207,7 +272,6 @@ const ProviderRegister = ({ onRegistered }) => {
                       value={formData.endpoint_point_details}
                       onChange={handleChange}
                       placeholder="/api/points/{id}"
-                      required
                     />
                   </div>
                 </div>
@@ -215,7 +279,7 @@ const ProviderRegister = ({ onRegistered }) => {
                 <div className="row">
                   <div className="col-md-6 mb-3">
                     <label className="form-label">
-                      Reserve Endpoint <span className="text-danger">*</span>
+                      Reserve Endpoint
                     </label>
                     <input
                       type="text"
@@ -224,7 +288,6 @@ const ProviderRegister = ({ onRegistered }) => {
                       value={formData.endpoint_reserve}
                       onChange={handleChange}
                       placeholder="/api/reserve"
-                      required
                     />
                   </div>
 

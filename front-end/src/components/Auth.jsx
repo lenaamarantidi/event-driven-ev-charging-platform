@@ -15,6 +15,7 @@ const Auth = ({ setToken, setUserRole }) => {
     company_tin: '',
     base_url: '',
     api_key: '',
+    openapi_url: '',
     endpoint_list_points: '',
     endpoint_point_details: '',
     endpoint_reserve: '',
@@ -51,6 +52,7 @@ const Auth = ({ setToken, setUserRole }) => {
         password: formData.password,
         base_url: formData.base_url.trim(),
         api_key: formData.api_key.trim(),
+        openapi_url: formData.openapi_url.trim(),
         endpoint_list_points: formData.endpoint_list_points.trim(),
         endpoint_point_details: formData.endpoint_point_details.trim(),
         endpoint_reserve: formData.endpoint_reserve.trim(),
@@ -157,6 +159,7 @@ const Auth = ({ setToken, setUserRole }) => {
       company_tin: '',
       base_url: '',
       api_key: '',
+      openapi_url: '',
       endpoint_list_points: '',
       endpoint_point_details: '',
       endpoint_reserve: '',
@@ -235,13 +238,24 @@ const Auth = ({ setToken, setUserRole }) => {
                     />
                   </div>
                   <div className="mb-3">
-                    <label>Base URL</label>
+                    <label>OpenAPI YAML URL</label>
+                    <input
+                      type="url"
+                      className="form-control"
+                      value={formData.openapi_url}
+                      onChange={handleFieldChange('openapi_url')}
+                      placeholder="https://provider.example.com/openapi.yaml"
+                      required
+                    />
+                  </div>
+                  <div className="mb-3">
+                    <label>Base URL fallback</label>
                     <input
                       type="url"
                       className="form-control"
                       value={formData.base_url}
                       onChange={handleFieldChange('base_url')}
-                      required
+                      placeholder="Optional if the YAML contains servers[0].url"
                     />
                   </div>
                   <div className="mb-3">
@@ -255,33 +269,33 @@ const Auth = ({ setToken, setUserRole }) => {
                     />
                   </div>
                   <div className="mb-3">
-                    <label>List Points Endpoint</label>
+                    <label>List Points Endpoint fallback</label>
                     <input
                       type="text"
                       className="form-control"
                       value={formData.endpoint_list_points}
                       onChange={handleFieldChange('endpoint_list_points')}
-                      required
+                      placeholder="Optional manual override"
                     />
                   </div>
                   <div className="mb-3">
-                    <label>Point Details Endpoint</label>
+                    <label>Point Details Endpoint fallback</label>
                     <input
                       type="text"
                       className="form-control"
                       value={formData.endpoint_point_details}
                       onChange={handleFieldChange('endpoint_point_details')}
-                      required
+                      placeholder="Optional manual override"
                     />
                   </div>
                   <div className="mb-3">
-                    <label>Reserve Endpoint</label>
+                    <label>Reserve Endpoint fallback</label>
                     <input
                       type="text"
                       className="form-control"
                       value={formData.endpoint_reserve}
                       onChange={handleFieldChange('endpoint_reserve')}
-                      required
+                      placeholder="Optional manual override"
                     />
                   </div>
                   <div className="mb-3">

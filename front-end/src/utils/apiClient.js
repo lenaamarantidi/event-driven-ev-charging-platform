@@ -43,9 +43,12 @@ export const providerAPI = {
         data: response.data
       };
     } catch (error) {
+      const details = error.response?.data?.details;
       return {
         success: false,
-        error: error.response?.data?.error || error.response?.data?.message || error.message
+        error: Array.isArray(details)
+          ? details.join(' | ')
+          : error.response?.data?.error || error.response?.data?.message || error.message
       };
     }
   },

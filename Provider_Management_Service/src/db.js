@@ -38,6 +38,7 @@ async function initializeDatabase() {
         integration_status VARCHAR(50) NOT NULL DEFAULT 'integration_pending' COMMENT 'integrated, integration_pending',
         base_url VARCHAR(500) NOT NULL,
         api_key VARCHAR(255) NOT NULL,
+        openapi_url VARCHAR(500) NULL,
         endpoint_list_points VARCHAR(500) NOT NULL COMMENT 'GET endpoint to list charging points',
         endpoint_point_details VARCHAR(500) NOT NULL COMMENT 'GET endpoint to get point details',
         endpoint_reserve VARCHAR(500) NOT NULL COMMENT 'POST endpoint to make reservation',
@@ -86,6 +87,10 @@ async function initializeDatabase() {
 
     if (!(await columnExists('providers', 'integration_status'))) {
       await connection.query("ALTER TABLE providers ADD COLUMN integration_status VARCHAR(50) NOT NULL DEFAULT 'integration_pending' COMMENT 'integrated, integration_pending' AFTER adapter_name");
+    }
+
+    if (!(await columnExists('providers', 'openapi_url'))) {
+      await connection.query('ALTER TABLE providers ADD COLUMN openapi_url VARCHAR(500) NULL AFTER api_key');
     }
 
     if (!(await columnExists('providers', 'endpoint_reserve_duration'))) {
