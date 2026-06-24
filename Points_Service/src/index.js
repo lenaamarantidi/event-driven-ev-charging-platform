@@ -22,27 +22,29 @@ app.use(express.json());
 
 const ADAPTER_SYNC_REQUEST_EXCHANGE = process.env.ADAPTER_SYNC_REQUEST_EXCHANGE || 'adapter.sync.requests';
 const ADAPTER_SYNC_TIMEOUT_MS = Number(process.env.ADAPTER_SYNC_TIMEOUT_MS || 15000);
-const ADAPTER_SYNC_TRANSPORT = (process.env.ADAPTER_SYNC_TRANSPORT || 'broker').toLowerCase();
-
-function getAdapterUrl(plugKey) {
-  if (plugKey === 'redPlug') return process.env.REDPLUG_ADAPTER_URL;
-  if (plugKey === 'greenPlug') return process.env.GREENPLUG_ADAPTER_URL;
-  if (plugKey === 'bluePlug') return process.env.BLUEPLUG_ADAPTER_URL;
-  return null;
-}
 
 async function fetchPointsFromAdapterHttp(plugKey) {
-  const adapterUrl = getAdapterUrl(plugKey);
-  if (!adapterUrl) {
-    throw new Error(`Missing adapter URL for ${plugKey}`);
+  const portMap = {
+    'redPlug': process.env.POINTS_RED_PORT,
+    'greenPlug': process.env.POINTS_GREEN_PORT,
+    'bluePlug': process.env.POINTS_BLUE_PORT
+  };
+  
+  const port = portMap[plugKey];
+  if (!port) {
+    throw new Error(`Missing port for ${plugKey}`);
   }
 
-  const response = await axios.get(`${adapterUrl.replace(/\/$/, '')}/api/points`, { timeout: ADAPTER_SYNC_TIMEOUT_MS });
+  const localUrl = `http://host.docker.internal:${port}/plugApi/points`;
+  const response = await axios.get(localUrl, { timeout: ADAPTER_SYNC_TIMEOUT_MS });
+  
   const points = Array.isArray(response.data)
     ? response.data
-    : Array.isArray(response.data?.points)
-      ? response.data.points
-      : [];
+    : Array.isArray(response.data?.data)
+      ? response.data.data
+      : Array.isArray(response.data?.points)
+        ? response.data.points
+        : [];
 
   return points;
 }
@@ -103,14 +105,6 @@ async function fetchPointsFromAdapterBroker(plugKey) {
 }
 
 async function fetchPointsFromAdapter(plugKey) {
-  if (ADAPTER_SYNC_TRANSPORT === 'broker') {
-    try {
-      return await fetchPointsFromAdapterBroker(plugKey);
-    } catch (err) {
-      console.warn(`[repopulate:${plugKey}] Broker sync failed, falling back to HTTP: ${err.message}`);
-    }
-  }
-
   return fetchPointsFromAdapterHttp(plugKey);
 }
 
@@ -182,7 +176,7 @@ initializeDatabase();
 
 const { PROVIDER_MAP } = require('./plugs_api');
 const { buildProviderUrl } = require('./plugs_api');
-const { normalizePoint } = require('./plugs_api');
+const { normalizePoint, toMySQLDateTime } = require('./plugs_api');
 
 // ============== HELPER FUNCTIONS ==============
 const { getAccessibleIps, getProviderNames } = require('./util');
@@ -408,8 +402,11 @@ function scheduleReservationExpiry(pointId, reservationEndTime) {
                   const protocol = 'http';
                   const serviceHost = 'host.docker.internal';
                   const centralUrl = `${protocol}://${serviceHost}:${centralPort}${DB_POINT_UPDATE.replace(':pointId', pointId)}`;
-                  console.log(`[scheduleReservationExpiry] Also updating central DB at ${centralUrl}`);
-                  await axios.put(centralUrl, { status: currentStatus });
+                  console.log(`[scheduleReservationExpiry] Syncing expiry to central DB at ${centralUrl}`);
+                  await axios.put(centralUrl, { 
+                    status: currentStatus,
+                    reservation_end_time: null
+                  });
                 }
               } catch (err) {
                 console.error(`[scheduleReservationExpiry] Failed to update central DB:`, err.message);
@@ -430,8 +427,11 @@ function scheduleReservationExpiry(pointId, reservationEndTime) {
                     const protocol = 'http';
                     const serviceHost = 'host.docker.internal';
                     const targetUrl = `${protocol}://${serviceHost}:${targetPort}${DB_POINT_UPDATE.replace(':pointId', pointId)}`;
-                    console.log(`[scheduleReservationExpiry] Central service updating ${targetPlug} DB at ${targetUrl}`);
-                    await axios.put(targetUrl, { status: currentStatus });
+                    console.log(`[scheduleReservationExpiry] Syncing expiry to ${targetPlug} DB at ${targetUrl}`);
+                    await axios.put(targetUrl, { 
+                      status: currentStatus,
+                      reservation_end_time: null
+                    });
                   } catch (err) {
                     console.error(`[scheduleReservationExpiry] Failed to update ${targetPlug} DB:`, err.message);
                   }
@@ -645,7 +645,7 @@ async function repopulate(service, filterIds = null) {
     let skippedCount = 0;
 
     for (const rawPoint of rawPoints) {
-      const normalized = normalizeAdapterPoint(rawPoint, plugKey);
+      const normalized = normalizePoint(rawPoint, plugKey);
 
       if (!normalized.id) {
         skippedCount++;
@@ -671,16 +671,16 @@ async function repopulate(service, filterIds = null) {
         [
           uuidv4(),
           normalized.id || null,
-          normalized.provider_name || null,
-          normalized.lon || null,
-          normalized.lat || null,
+          normalized.provider_name || plugKey,
+          normalized.lon,
+          normalized.lat,
           normalized.status || null,
           normalized.capacity || null,
           normalized.price || null,
           normalized.connector || null,
           normalized.location_name || null,
           normalized.address || null,
-          normalized.reservation_end_time || null,
+          toMySQLDateTime(normalized.reservation_end_time) || null,
           new Date(),
           new Date(),
         ]
@@ -694,7 +694,7 @@ async function repopulate(service, filterIds = null) {
     const payload = {
       service,
       plugKey,
-      transport: ADAPTER_SYNC_TRANSPORT,
+
       fetched: rawPoints.length,
       newCount,
       updatedCount,
@@ -751,57 +751,82 @@ async function repopulate_central(req) {
     let skippedCount = 0;
 
     for (const point of allPoints) {
-      // Convert ISO datetime strings to MySQL DATETIME format (remove T and Z)
-      const normalizeDateTime = (dateStr) => {
-        if (!dateStr) return null;
-        return dateStr.replace(/T/, ' ').replace(/\.\d+Z$/, '').replace(/Z$/, '');
-      };
+      // Determine provider based on point structure (try to infer which adapter returned this)
+      let provider = point.provider_name ?? point.providerName ?? point.provider ?? null;
+      let plugKey = null;
 
-      const pointId = point.point_id ?? point.pointId ?? point.id ?? point.uid ?? point.chargerId ?? point.pointid ?? null;
-      if (!pointId) {
+      if (!provider) {
+        // Try to infer from point structure
+        if (point.chargerId) plugKey = 'bluePlug';
+        else if (point.pointid) plugKey = 'redPlug';
+        else if (point.id) plugKey = 'greenPlug';
+      } else {
+        // Map provider name to plugKey
+        const providerLower = String(provider).toLowerCase();
+        if (providerLower.includes('blue')) plugKey = 'bluePlug';
+        else if (providerLower.includes('red')) plugKey = 'redPlug';
+        else if (providerLower.includes('green')) plugKey = 'greenPlug';
+      }
+
+      // Skip if we can't determine the provider
+      if (!plugKey) {
+        console.warn(`[repopulate_central] Could not determine provider for point, skipping`);
         skippedCount++;
-        console.warn(`[repopulate_central] Skipping point without ID: ${JSON.stringify(point)}`);
         continue;
       }
 
-      const reservationEndTime = normalizeDateTime(
-        point.reservation_end_time ?? point.reservationEndTime ?? point.reservedUntil ?? point.reservationEnd ?? null
-      );
+      try {
+        const normalized = normalizePoint(point, plugKey);
+        const pointId = normalized.id;
 
-      await client.query(
-        `INSERT INTO points
-          (id, point_id, provider_name, lon, lat, status, capacity_kw, kwh_price, connector, location_name, address, reservation_end_time, last_updated, created_at)
-          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-          ON DUPLICATE KEY UPDATE
-          status = VALUES(status),
-          capacity_kw = VALUES(capacity_kw),
-          kwh_price = VALUES(kwh_price),
-          lon = VALUES(lon),
-          lat = VALUES(lat),
-          connector = VALUES(connector),
-          location_name = VALUES(location_name),
-          address = VALUES(address),
-          reservation_end_time = VALUES(reservation_end_time),
-          last_updated = CURRENT_TIMESTAMP`,
-        [
-          uuidv4(),
-          pointId,
-          point.provider_name ?? point.providerName ?? point.provider ?? null,
-          point.lon ?? point.lng ?? point.geo?.[1] ?? point.coords?.long ?? null,
-          point.lat ?? point.geo?.[0] ?? point.coords?.lat ?? null,
-          point.status ?? point.state ?? point.currentStatus ?? null,
-          point.capacity_kw ?? point.capacityKw ?? point.capacity ?? point.cap ?? null,
-          point.kwh_price ?? point.kwhPrice ?? point.pricePerKwh ?? point.kwhRateEur ?? point.price ?? null,
-          point.connector || null,
-          point.location_name ?? point.locationName ?? null,
-          point.address || null,
-          reservationEndTime,
-          new Date(),
-          new Date()
-        ]
-      );
+        if (!pointId) {
+          skippedCount++;
+          console.warn(`[repopulate_central] Skipping point without ID: ${JSON.stringify(point)}`);
+          continue;
+        }
 
-      insertedCount++;
+        const reservationEndTime = normalized.reservation_end_time
+          ? normalized.reservation_end_time.replace(/\.\d{3}Z$/, '').replace('T', ' ')
+          : null;
+
+        await client.query(
+          `INSERT INTO points
+            (id, point_id, provider_name, lon, lat, status, capacity_kw, kwh_price, connector, location_name, address, reservation_end_time, last_updated, created_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ON DUPLICATE KEY UPDATE
+            status = VALUES(status),
+            capacity_kw = VALUES(capacity_kw),
+            kwh_price = VALUES(kwh_price),
+            lon = VALUES(lon),
+            lat = VALUES(lat),
+            connector = VALUES(connector),
+            location_name = VALUES(location_name),
+            address = VALUES(address),
+            reservation_end_time = VALUES(reservation_end_time),
+            last_updated = CURRENT_TIMESTAMP`,
+          [
+            uuidv4(),
+            pointId,
+            normalized.provider_name || plugKey,
+            normalized.lon,
+            normalized.lat,
+            normalized.status || null,
+            normalized.capacity || null,
+            normalized.price || null,
+            normalized.connector || null,
+            normalized.location_name || null,
+            normalized.address || null,
+            reservationEndTime,
+            new Date(),
+            new Date()
+          ]
+        );
+
+        insertedCount++;
+      } catch (pointErr) {
+        console.error(`[repopulate_central] Error normalizing/inserting point:`, pointErr.message);
+        skippedCount++;
+      }
     }
 
     console.log(`[repopulate_central] Inserted ${insertedCount} points, skipped ${skippedCount}, committing...`);
@@ -824,8 +849,8 @@ async function repopulate_central(req) {
 
 /**
  * POST /db/repopulate
- * Fetch all points from the selected plug API and insert them into MariaDB.
- * Body (optional): { provider?: 'redPlug'|'greenPlug'|'bluePlug' }
+ * Central DB repopulates ALL databases (central + individual services)
+ * Individual services repopulate only their own DB
  */
 app.post(DB_REPOPULATE, async (req, res) => {
   try {
@@ -839,15 +864,63 @@ app.post(DB_REPOPULATE, async (req, res) => {
     // Filter points if IDs provided in request body
     const { points: filterIds } = req.body || {};
 
-    // If service contains 'central', repopulate all 3 basic providers
+    // If service contains 'central', repopulate ALL 4 databases
     if (String(service).toLowerCase().includes('central')) {
+      console.log('[/db/repopulate] CENTRAL SERVICE: repopulating all 4 databases (central + individual)');
+      
+      // Step 1: Populate central DB from all 3 adapters
+      console.log('[/db/repopulate] Step 1: Populating central DB from all adapters...');
       const centralResult = await repopulate_central(req);
-      return res.json({ service, transport: ADAPTER_SYNC_TRANSPORT, centralRepopulate: centralResult });
-
-
+      console.log(`[/db/repopulate] Central DB populated: ${centralResult.totalPoints} points`);
+      
+      // Step 2: Trigger repopulation on each individual service to sync their DBs
+      // Each individual service will repopulate with ONLY its own provider's points
+      const individualResults = {};
+      const providers = ['redPlug', 'greenPlug', 'bluePlug'];
+      const portMap = {
+        'redPlug': process.env.POINTS_RED_PORT,
+        'greenPlug': process.env.POINTS_GREEN_PORT,
+        'bluePlug': process.env.POINTS_BLUE_PORT
+      };
+      
+      console.log('[/db/repopulate] Step 2: Repopulating individual service DBs...');
+      for (const provider of providers) {
+        try {
+          const port = portMap[provider];
+          if (!port) {
+            console.warn(`[/db/repopulate] Missing port for ${provider}, skipping`);
+            individualResults[provider] = { error: `Missing port environment variable`, success: false };
+            continue;
+          }
+          
+          const serviceUrl = `http://host.docker.internal:${port}/db/repopulate`;
+          console.log(`[/db/repopulate] Calling ${provider} at ${serviceUrl}`);
+          
+          const response = await axios.post(serviceUrl, req.body || {}, { timeout: 30000 });
+          individualResults[provider] = response.data;
+          
+          const pointsCount = response.data.newCount || response.data.fetched || 0;
+          console.log(`[/db/repopulate] ${provider} repopulated: ${pointsCount} points`);
+        } catch (err) {
+          console.error(`[/db/repopulate] Failed to repopulate ${provider}: ${err.message}`);
+          individualResults[provider] = { error: err.message, success: false };
+        }
+      }
+      
+      const allSuccess = Object.values(individualResults).every(r => !r.error);
+      
+      return res.json({
+        service,
+        message: 'All 4 databases repopulated successfully',
+        centralRepopulate: centralResult,
+        individualServices: individualResults,
+        allDatabasesSynced: allSuccess,
+        timestamp: new Date()
+      });
     }
 
-    // Use the current logic for non-central services
+    // Individual service: repopulate only its own DB from its adapter
+    console.log(`[/db/repopulate] INDIVIDUAL SERVICE (${service}): repopulating only local DB`);
     const payload = await repopulate(service, filterIds);
     return res.json(payload);
   } catch (err) {
@@ -855,6 +928,7 @@ app.post(DB_REPOPULATE, async (req, res) => {
     return res.status(500).json({ error: err.message });
   }
 });
+
 
 // PUT /db/points/:pointId - Update a specific point
 app.put(DB_POINT_UPDATE, async (req, res) => {
@@ -1414,7 +1488,7 @@ app.get('/point/:pointId', async (req, res) => {
 
 /**
  * POST /api/points/:pointId/reserve
- * Reserve a charging point via provider API and update DB status
+ * Reserve a charging point via provider API and update DB status + sync across services
  */
 app.post(API_POINTS_RESERVE, async (req, res) => {
   try {
@@ -1425,10 +1499,7 @@ app.post(API_POINTS_RESERVE, async (req, res) => {
       );
     }
 
-const { pointId } = req.params;
-
-    // Client sends { duration: <minutes> } (per requirement: request JSON has `minutes` key)
-    // Accept both `duration` and `minutes` for robustness.
+    const { pointId } = req.params;
     const { duration, minutes } = req.body || {};
     const reserveMinutes = duration ?? minutes;
 
@@ -1450,40 +1521,29 @@ const { pointId } = req.params;
     }
 
     let reserveUrl = buildProviderUrl(provider, "reservePath", pointId);
-
     const bearerToken = process.env.BEARER_TOKEN;
     const headers = { 'Accept': 'application/json' };
     if (bearerToken) {
       headers.Authorization = `Bearer ${bearerToken}`;
     }
 
-    // Build provider-specific request body.
-    // Requirement from user: body uses `minutes` key in the request JSON.
-    // We'll use reserveMinutes to populate provider payload.
+    // Build provider-specific request body
     let reserveBody = {};
-
     if (reserveMinutes !== undefined && reserveMinutes !== null) {
-      // Normalize minutes to a number if possible
       const minutesNum = Number(reserveMinutes);
       const minutesInt = parseInt(minutesNum);
       if (!Number.isNaN(minutesNum)) {
         if (provider === 'bluePlug') {
           reserveUrl += `?minutes=${minutesInt}`;
-          console.log(`Built reserveUrl for bluePlug with duration as query param: ${reserveUrl}`);
-        }else if (provider === 'redPlug') {
-          // redPlug supports duration in the URL path, so we can skip it in the body.
+        } else if (provider === 'redPlug') {
           reserveUrl = buildProviderUrl(provider, "reservePathWduration", `${pointId},${minutesInt}`);
-          console.log(`Built reserveUrl for redPlug with duration in path: ${reserveUrl}`);
-        }else if (provider === 'greenPlug') {
+        } else if (provider === 'greenPlug') {
           reserveBody = { duration: minutesInt };
-          console.log(`Built reserveBody for greenPlug with duration in body:`, reserveBody," and reserveUrl: ", reserveUrl);
-        }else{
-          throw new Error(`Provider ${provider} must be one of redPlug, greenPlug, bluePlug for duration handling`);
         }
       }
     }
 
-    console.log(`📡 Reserving point ${pointId} via ${provider}: POST ${reserveUrl}`, reserveBody);
+    console.log(`[reserve] POST ${reserveUrl}`, reserveBody);
     const reserveResp = await axios.post(reserveUrl, reserveBody, {
       timeout: 10000,
       headers
@@ -1493,63 +1553,110 @@ const { pointId } = req.params;
     const normalizedResp = normalizePoint(reserveData, provider);
 
     const newStatus = normalizedResp.status;
-    const reservationEndTime = normalizedResp.reservation_end_time;
-
-
+    let reservationEndTime = normalizedResp.reservation_end_time;
 
     if (newStatus !== 'held' && newStatus !== 'reserved') {
       return res.status(400).json({
-        error: 'Reservation failed: Expecting provider to return status "held" or "reserved" after reservation attempt',
+        error: 'Reservation failed: provider did not return status "held" or "reserved"',
         status: newStatus,
         details: reserveData
       });
     }
 
+    // If provider didn't return a reservation end time, calculate one from requested minutes
+    if (!reservationEndTime && reserveMinutes) {
+      const minutesInt = parseInt(Number(reserveMinutes));
+      if (!Number.isNaN(minutesInt) && minutesInt > 0) {
+        const expiryMs = Date.now() + (minutesInt * 60000);
+        reservationEndTime = new Date(expiryMs).toISOString();
+        console.log(`[reserve] Calculated reservation_end_time: ${reservationEndTime}`);
+      }
+    }
+
+    if (!reservationEndTime) {
+      console.warn(`[reserve] Warning: No reservation end time from provider or duration specified`);
+    }
+
+    // Convert ISO datetime to MySQL DATETIME format before inserting
+    const reservationEndTimeMysql = reservationEndTime ? toMySQLDateTime(reservationEndTime) : null;
+
+    // Update this service's DB
     try {
-      // Single UPDATE statement => atomic: either the whole row is updated or none.
       await pointsMysql.query(
         'UPDATE points SET status = ?, reservation_end_time = ?, last_updated = CURRENT_TIMESTAMP WHERE point_id = ?',
-        [newStatus, reservationEndTime || null, pointId]
+        [newStatus, reservationEndTimeMysql, pointId]
       );
     } catch (dbErr) {
-      // If DB fails, do not mask the provider reservation result; return error to caller.
       throw dbErr;
     }
 
+    // Sync to other services
+    const serviceEnv = String(process.env.SERVICE || '').toLowerCase();
+    
+    if (serviceEnv.includes('central') && provider) {
+      // Central service: sync to individual provider DB
+      try {
+        const portMap = {
+          'redPlug': process.env.POINTS_RED_PORT,
+          'greenPlug': process.env.POINTS_GREEN_PORT,
+          'bluePlug': process.env.POINTS_BLUE_PORT
+        };
+        const port = portMap[provider];
+        if (port) {
+          const syncUrl = `http://host.docker.internal:${port}/db/points/${pointId}`;
+          console.log(`[reserve] Syncing to ${provider} DB: ${syncUrl}`);
+          await axios.put(syncUrl, {
+            status: newStatus,
+            reservation_end_time: reservationEndTimeMysql
+          }, { timeout: 5000 });
+          console.log(`[reserve] Synced ${provider} DB`);
+        }
+      } catch (syncErr) {
+        console.warn(`[reserve] Sync to ${provider} failed: ${syncErr.message}`);
+      }
+    } else if (!serviceEnv.includes('central')) {
+      // Individual service: sync to central DB
+      try {
+        const centralPort = process.env.POINTS_CENTRAL_PORT;
+        if (centralPort) {
+          const syncUrl = `http://host.docker.internal:${centralPort}/db/points/${pointId}`;
+          console.log(`[reserve] Syncing to central DB: ${syncUrl}`);
+          await axios.put(syncUrl, {
+            status: newStatus,
+            reservation_end_time: reservationEndTimeMysql
+          }, { timeout: 5000 });
+          console.log(`[reserve] Synced central DB`);
+        }
+      } catch (syncErr) {
+        console.warn(`[reserve] Sync to central failed: ${syncErr.message}`);
+      }
+    }
+
+    // Notify SSE clients
     try {
       const [freshRows] = await pointsMysql.query('SELECT * FROM points WHERE point_id = ?', [pointId]);
       if (freshRows.length > 0) notifyPointUpdate(freshRows[0]);
     } catch (_) {}
 
-    console.log(`✓ Point ${pointId} reserved successfully, status updated to ${newStatus} in ${service} DB`);
+    console.log(`Reserved point ${pointId} via ${provider}, status: ${newStatus}`);
+    const remainingMs = reservationEndTime ? scheduleReservationExpiry(pointId, reservationEndTime) : 0;
 
-    const remainingMs = scheduleReservationExpiry(pointId, reservationEndTime);
-
-    await publishReservationSuccessful({
-      pointId,
-      reservation_end_time: reservationEndTime || null,
-      reservation_status: newStatus,
-      source_service: service,
-      provider,
-    });
-
-    // Build response with all update results
-    const responseData = {
+    res.json({
       pointId,
       provider,
       status: newStatus,
-      reservationEndTime: reservationEndTime,
+      reservationEndTime: reservationEndTime || null,
+      reservationMinutes: reserveMinutes || null,
       timestamp: new Date(),
-      expiresIn: `${Math.floor(remainingMs / 1000)} seconds`,
-      message: `Point ${pointId} reserved successfully via ${provider}; state propagated through RabbitMQ`
-    };
-
-    res.json(responseData);
+      expiresIn: remainingMs > 0 ? `${Math.floor(remainingMs / 1000)} seconds` : 'unknown',
+      message: `Point ${pointId} reserved successfully via ${provider}`
+    });
   } catch (err) {
     console.error('Error reserving point:', err.message);
     res.status(500).json({ error: 'Failed to reserve point', details: err.message });
   }
 });
+
 
 app.post(API_POINTS_RESERVE_MINUTES, async (req, res) => {
   try {
@@ -1689,7 +1796,15 @@ let server = null;
 async function startServer() {
   try {
     setDependencies({ db: pointsMysql, scheduleReservationExpiry, notifyPointUpdate });
-    await connectRabbitMQ();
+    
+    // RabbitMQ is optional - try to connect but don't fail if unavailable
+    try {
+      await connectRabbitMQ();
+      console.log(`✓ RabbitMQ connected`);
+    } catch (rabbitErr) {
+      console.warn(`⚠️ RabbitMQ unavailable (optional): ${rabbitErr.message}`);
+    }
+    
     await recoverReservationExpiryTimers();
     
     // Initialize scheduled sync for automatic data updates (1-2x per day)
@@ -1741,5 +1856,4 @@ process.on('SIGINT', async () => {
 });
 
 // Export constants for external use (e.g., Frontend Service)
-module.exports = app;
 module.exports = app;

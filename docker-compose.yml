@@ -199,11 +199,7 @@ services:
       MARIADB_USER: root
       MARIADB_PASSWORD: root
       RABBITMQ_URL: amqp://guest:guest@rabbitmq:5672
-      REDPLUG_ADAPTER_URL: http://provider-adapter-redplug:3111
-      GREENPLUG_ADAPTER_URL: http://provider-adapter-greenplug:3112
-      BLUEPLUG_ADAPTER_URL: http://provider-adapter-blueplug:3113
       SYNC_INGEST_TOKEN: sync-ingest-dev-token
-      ADAPTER_SYNC_TRANSPORT: broker
       ADAPTER_SYNC_REQUEST_EXCHANGE: adapter.sync.requests
       POINTS_RPC_EXCHANGE: points.rpc
       RESERVATION_TIMEZONE: Europe/Athens
