@@ -345,7 +345,7 @@ export const billingAPI = {
   getInvoice: async (providerId) => {
     try {
       const api = createApiInstance(SERVICES.billing);
-      const response = await api.get(`/billing/invoice/${providerId}`, getAuthHeaders());
+      const response = await api.get(`/invoice/${providerId}`, getAuthHeaders());
       return {
         success: true,
         data: response.data
@@ -365,7 +365,7 @@ export const billingAPI = {
   getInvoiceHistory: async (providerId, limit = 12) => {
     try {
       const api = createApiInstance(SERVICES.billing);
-      const response = await api.get(`/billing/invoices/${providerId}?limit=${limit}`, getAuthHeaders());
+      const response = await api.get(`/invoices/${providerId}?limit=${limit}`, getAuthHeaders());
       return {
         success: true,
         data: response.data
@@ -386,7 +386,7 @@ export const billingAPI = {
   markInvoiceAsPaid: async (providerId, invoiceId) => {
     try {
       const api = createApiInstance(SERVICES.billing);
-      const response = await api.post(`/billing/invoices/${providerId}/${invoiceId}/mark-paid`, {}, getAuthHeaders());
+      const response = await api.post(`/invoices/${providerId}/${invoiceId}/mark-paid`, {}, getAuthHeaders());
       return {
         success: true,
         data: response.data
@@ -407,7 +407,7 @@ export const billingAPI = {
     try {
       const api = createApiInstance(SERVICES.billing);
       const response = await api.post(
-        `/billing/invoices/${providerId}/${invoiceId}/pay`,
+        `/invoices/${providerId}/${invoiceId}/pay`,
         paymentData || { paymentMethod: 'bank_transfer' },
         getAuthHeaders()
       );
@@ -431,7 +431,7 @@ export const billingAPI = {
     try {
       const api = createApiInstance(SERVICES.billing);
       const response = await api.get(
-        `/billing/provider/${providerId}/payments?limit=${limit}`,
+        `/provider/${providerId}/payments?limit=${limit}`,
         getAuthHeaders()
       );
       return {
@@ -455,7 +455,7 @@ export const billingAPI = {
     try {
       const api = createApiInstance(SERVICES.billing);
       const response = await api.get(
-        `/billing/outstanding/${providerId}`,
+        `/outstanding/${providerId}`,
         getAuthHeaders()
       );
       return {
@@ -478,7 +478,7 @@ export const billingAPI = {
   getSummary: async (providerId) => {
     try {
       const api = createApiInstance(SERVICES.billing);
-      const response = await api.get(`/billing/summary/${providerId}`, getAuthHeaders());
+      const response = await api.get(`/summary/${providerId}`, getAuthHeaders());
       return {
         success: true,
         data: response.data

@@ -1,7 +1,3 @@
--- Billing_Service Database Schema
--- Database: billing_db
--- Stores billable events and invoices for providers
-
 -- Billing Service database schema and mock billing data
 -- Database: billing_db
 
@@ -183,4 +179,3 @@ ON DUPLICATE KEY UPDATE
   reservation_price = VALUES(reservation_price),
   estimated_amount = VALUES(estimated_amount),
   updated_at = VALUES(updated_at);
-

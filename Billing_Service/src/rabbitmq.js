@@ -19,22 +19,23 @@ const EXCHANGE_NAME = 'billing_exchange';
 const QUEUE_NAME = 'billing_reservation_queue';
 const QUEUE_DEADLETTER = 'billing_dlq';
 
-/**
- * Get the default pricing configuration
- */
-async function getDefaultPricing() {
+function formatDate(date) {
+  return date.toISOString().slice(0, 10);
+}
+
+async function getProviderReservationPrice(providerId) {
   try {
     const [rows] = await pool.query(
-      'SELECT cost_per_reservation FROM pricing_config WHERE provider_id IS NULL AND active = 1 LIMIT 1'
+      'SELECT reservation_price FROM provider_pricing WHERE provider_id = ? LIMIT 1',
+      [providerId]
     );
     if (rows.length > 0) {
-      return rows[0].cost_per_reservation;
+      return parseFloat(rows[0].reservation_price);
     }
-    return 0.50; // Default fallback
   } catch (err) {
-    console.error('Error fetching pricing:', err.message);
-    return 0.50; // Default fallback
+    console.error('Error fetching provider reservation price:', err.message);
   }
+  return 0.10;
 }
 
 /**
@@ -159,10 +160,10 @@ async function handleBillingEvent(msg) {
     const billingMonth = new Date(date.getFullYear(), date.getMonth(), 1);
     const billingMonthStr = new Date(billingMonth).toLocaleDateString('el-GR');
 
-    // If no amount provided, use the default pricing
+    // If no amount provided, use provider-specific reservation price or fallback default pricing
     let billAmount = amount;
     if (!billAmount || billAmount === 0) {
-      billAmount = await getDefaultPricing();
+      billAmount = await getProviderReservationPrice(providerId);
     }
 
     // Validate reservation UUID
@@ -248,9 +249,34 @@ async function connectWithRetry(maxRetries = 5, initialDelay = 2000) {
   }
 }
 
+function publishInvoiceCreated(payload) {
+  if (!channel) {
+    console.warn('Cannot publish invoice.created event; RabbitMQ channel is not established');
+    return false;
+  }
+
+  try {
+    const routingKey = 'invoice.created';
+    const published = channel.publish(EXCHANGE_NAME, routingKey, Buffer.from(JSON.stringify(payload)), {
+      persistent: true,
+      contentType: 'application/json'
+    });
+    if (published) {
+      console.log(`Published invoice.created event for provider ${payload.providerId}`);
+    } else {
+      console.warn('Invoice.created event was not published successfully');
+    }
+    return published;
+  } catch (err) {
+    console.error('Failed to publish invoice.created event:', err.message);
+    return false;
+  }
+}
+
 module.exports = {
   connectRabbitMQ,
   connectWithRetry,
   startConsumer,
-  closeConnection
+  closeConnection,
+  publishInvoiceCreated
 };

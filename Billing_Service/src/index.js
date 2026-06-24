@@ -16,10 +16,13 @@ const {
   getProviderInvoices,
   markInvoicePaid,
   processPayment,
+  handlePaymentProcessedWebhook,
   getProviderPaymentHistory,
   getOutstandingInvoices,
   getBillingSummary,
-  healthCheck
+  healthCheck,
+  scheduleDailyBillingTasks,
+  subscribeToBrokerEvent
 } = require('./controllers');
 
 const app = express();
@@ -66,18 +69,23 @@ app.get('/', (req, res) => {
  */
 app.get('/api/billing/invoice/:providerId', getProviderInvoice);
 
+// Also expose endpoints without the '/api' prefix for local dev proxy compatibility
+app.get('/billing/invoice/:providerId', getProviderInvoice);
+
 /**
  * Get all invoices for a provider
  * GET /api/billing/invoices/:providerId
  * Query params: limit, offset, status
  */
 app.get('/api/billing/invoices/:providerId', getProviderInvoices);
+app.get('/billing/invoices/:providerId', getProviderInvoices);
 
 /**
  * Mark an invoice as paid (legacy endpoint)
  * POST /api/billing/invoices/:providerId/:invoiceId/mark-paid
  */
 app.post('/api/billing/invoices/:providerId/:invoiceId/mark-paid', markInvoicePaid);
+app.post('/billing/invoices/:providerId/:invoiceId/mark-paid', markInvoicePaid);
 
 /**
  * UC07: Process payment for invoice
@@ -85,6 +93,13 @@ app.post('/api/billing/invoices/:providerId/:invoiceId/mark-paid', markInvoicePa
  * Body: { paymentMethod, reference, notes }
  */
 app.post('/api/billing/invoices/:providerId/:invoiceId/pay', processPayment);
+app.post('/billing/invoices/:providerId/:invoiceId/pay', processPayment);
+
+/**
+ * Broker webhook for payment.processed events
+ * POST /api/webhooks/payment-processed
+ */
+app.post('/api/webhooks/payment-processed', handlePaymentProcessedWebhook);
 
 /**
  * UC07: Get payment history for provider
@@ -92,18 +107,21 @@ app.post('/api/billing/invoices/:providerId/:invoiceId/pay', processPayment);
  * Query params: limit, offset
  */
 app.get('/api/billing/provider/:providerId/payments', getProviderPaymentHistory);
+app.get('/billing/provider/:providerId/payments', getProviderPaymentHistory);
 
 /**
  * Get all outstanding invoices for provider
  * GET /api/billing/outstanding/:providerId
  */
 app.get('/api/billing/outstanding/:providerId', getOutstandingInvoices);
+app.get('/billing/outstanding/:providerId', getOutstandingInvoices);
 
 /**
  * Get billing summary for a provider
  * GET /api/billing/summary/:providerId
  */
 app.get('/api/billing/summary/:providerId', getBillingSummary);
+app.get('/billing/summary/:providerId', getBillingSummary);
 
 /**
  * Health check endpoint
@@ -160,12 +178,29 @@ async function startServer() {
     await connectWithRetry(5, 2000);
     console.log('RabbitMQ connection successful');
 
+    // Subscribe to payment.processed webhook from broker
+    console.log('Subscribing to payment.processed webhook...');
+    const BILLING_SERVICE_URL = process.env.BILLING_SERVICE_URL || 'http://localhost:3103';
+    const webhookUrl = `${BILLING_SERVICE_URL}/api/webhooks/payment-processed`;
+    try {
+      await subscribeToBrokerEvent('payment.processed', webhookUrl);
+      console.log('✓ Subscribed to payment.processed events');
+    } catch (err) {
+      console.warn('Warning: Could not subscribe to payment.processed webhook:', err.message);
+    }
+
+    // Schedule daily billing tasks (daily usage refresh and monthly invoice generation)
+    console.log('Scheduling daily billing tasks...');
+    scheduleDailyBillingTasks();
+    console.log('✓ Daily billing scheduler started');
+
     // Start Express server
     app.listen(PORT, () => {
       console.log(`✓ Billing Service listening on port ${PORT}`);
       console.log(`✓ Database: ${process.env.DB_NAME || 'billing_db'}`);
       console.log(`✓ RabbitMQ: ${process.env.RABBITMQ_URL || 'amqp://localhost'}`);
       console.log(`✓ Consuming events from billing_exchange`);
+      console.log(`✓ Webhook endpoint: POST /api/webhooks/payment-processed`);
     });
   } catch (err) {
     console.error('Failed to start server:', err.message);

@@ -292,6 +292,7 @@ services:
       DB_USER: billing_user
       DB_PASSWORD: billing_pass
       DB_NAME: billing_db
+      ANALYTICS_SERVICE_URL: http://analytics-service:3106
       MESSAGE_BROKER_URL: http://message-broker:3003
       RABBITMQ_URL: amqp://guest:guest@rabbitmq:5672
     depends_on:
