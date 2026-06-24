@@ -31,13 +31,44 @@ const formatNumber = (value) => new Intl.NumberFormat('en-US').format(toNumber(v
 
 const formatPercent = (value) => `${toNumber(value).toFixed(1)}%`;
 
+const parseInvoiceDate = (value) => {
+  if (!value) {
+    return null;
+  }
+
+  const normalizedValue = String(value).trim();
+  const euDateMatch = normalizedValue.match(/^(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{4})$/);
+  if (euDateMatch) {
+    const [_, day, month, year] = euDateMatch;
+    const normalized = new Date(`${year}-${month.padStart(2, '0')}-${day.padStart(2, '0')}T00:00:00Z`);
+    if (!Number.isNaN(normalized.getTime())) {
+      return normalized;
+    }
+  }
+
+  const date = new Date(normalizedValue);
+  if (!Number.isNaN(date.getTime())) {
+    return date;
+  }
+
+  return null;
+};
+
+const getDateKey = () => new Date().toISOString().slice(0, 10);
+
+const hasFetchedToday = (storageKey) => localStorage.getItem(storageKey) === getDateKey();
+
+const markFetchedToday = (storageKey) => {
+  localStorage.setItem(storageKey, getDateKey());
+};
+
 const formatDate = (value) => {
   if (!value) {
     return 'Not available';
   }
 
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) {
+  const date = parseInvoiceDate(value);
+  if (!date || Number.isNaN(date.getTime())) {
     return 'Not available';
   }
 
@@ -208,10 +239,33 @@ const ProviderDashboard = ({ setToken }) => {
   const [analyticsError, setAnalyticsError] = useState('');
   const [periodError, setPeriodError] = useState('');
   const [invoiceLoading, setInvoiceLoading] = useState(false);
-  const [invoiceData, setInvoiceData] = useState(null);
   const [invoiceHistory, setInvoiceHistory] = useState([]);
   const [invoiceError, setInvoiceError] = useState('');
   const [paymentLoading, setPaymentLoading] = useState(false);
+  const [billingSummary, setBillingSummary] = useState(null);
+  const [billingSummaryLoading, setBillingSummaryLoading] = useState(false);
+  const [billingSummaryError, setBillingSummaryError] = useState('');
+
+  const invoiceCatalog = useMemo(() => {
+    const today = new Date();
+    return invoiceHistory
+      .filter((invoice) => {
+        const periodStart = parseInvoiceDate(invoice.billing_period_start);
+        if (!periodStart) {
+          return true;
+        }
+
+        return !(
+          periodStart.getFullYear() === today.getFullYear() &&
+          periodStart.getMonth() === today.getMonth()
+        );
+      })
+      .sort((a, b) => {
+        const aDate = parseInvoiceDate(a.billing_period_start);
+        const bDate = parseInvoiceDate(b.billing_period_start);
+        return (bDate?.getTime() || 0) - (aDate?.getTime() || 0);
+      });
+  }, [invoiceHistory]);
 
   const providerId = localStorage.getItem('providerId') || '1';
 
@@ -220,7 +274,13 @@ const ProviderDashboard = ({ setToken }) => {
     [timeseries]
   );
 
-  const fetchAnalyticsSummary = useCallback(async () => {
+  const fetchAnalyticsSummary = useCallback(async (forceRefresh = false) => {
+    const lastFetchKey = `analyticsLastFetch_${providerId}`;
+    const alreadyFetchedToday = hasFetchedToday(lastFetchKey);
+    if (!forceRefresh && alreadyFetchedToday && providerKpis.providerId !== null && timeseries.reservationsPerMonth.length > 0) {
+      return;
+    }
+
     try {
       setAnalyticsLoading(true);
       setAnalyticsError('');
@@ -252,6 +312,7 @@ const ProviderDashboard = ({ setToken }) => {
       } else {
         setAnalyticsError((current) => current || timeseriesResult.error || 'Could not load analytics timeseries.');
       }
+      markFetchedToday(lastFetchKey);
     } catch {
       setAnalyticsError('Could not load provider analytics.');
     } finally {
@@ -289,50 +350,77 @@ const ProviderDashboard = ({ setToken }) => {
     fetchPeriodStats(selectedPeriod);
   }, [fetchPeriodStats, selectedPeriod]);
 
-  const fetchInvoiceData = async () => {
+  const fetchBillingSummary = useCallback(async () => {
     try {
-      setInvoiceLoading(true);
-      setInvoiceError('');
+      setBillingSummaryLoading(true);
+      setBillingSummaryError('');
 
-      const result = await billingAPI.getInvoice(providerId);
+      const result = await billingAPI.getSummary(providerId);
       if (result.success) {
-        setInvoiceData(result.data);
+        setBillingSummary(result.data);
       } else {
-        setInvoiceError(result.error || 'No invoice found.');
-      }
-
-      const historyResult = await billingAPI.getInvoiceHistory(providerId);
-      if (historyResult.success) {
-        setInvoiceHistory(historyResult.data.invoices || []);
+        setBillingSummary(null);
+        setBillingSummaryError(result.error || 'Could not load billing summary.');
       }
     } catch {
-      setInvoiceError('Error loading invoice data.');
+      setBillingSummary(null);
+      setBillingSummaryError('Could not load billing summary.');
     } finally {
-      setInvoiceLoading(false);
+      setBillingSummaryLoading(false);
     }
-  };
+  }, [providerId]);
 
-  const handleRequestPayment = async () => {
-    if (!invoiceData?.invoice_id) {
-      setInvoiceError('No invoice is selected for payment.');
+  const fetchInvoiceData = useCallback(async (forceRefresh = false) => {
+    const lastFetchKey = `billingLastFetch_${providerId}`;
+    const alreadyFetchedToday = hasFetchedToday(lastFetchKey);
+    if (!forceRefresh && alreadyFetchedToday && invoiceHistory.length > 0 && billingSummary !== null) {
       return;
     }
 
     try {
-      setPaymentLoading(true);
+      setInvoiceLoading(true);
       setInvoiceError('');
 
-      const result = await billingAPI.processPayment(providerId, invoiceData.invoice_id, {
+      const historyResult = await billingAPI.getInvoiceHistory(providerId);
+      if (historyResult.success) {
+        setInvoiceHistory(historyResult.data.invoices || []);
+      } else {
+        setInvoiceHistory([]);
+        setInvoiceError(historyResult.error || 'No invoice history found.');
+      }
+
+      await fetchBillingSummary();
+      markFetchedToday(lastFetchKey);
+    } catch {
+      setInvoiceHistory([]);
+      setInvoiceError('Error loading invoice data.');
+    } finally {
+      setInvoiceLoading(false);
+    }
+  }, [providerId, fetchBillingSummary]);
+
+  useEffect(() => {
+    if (activeTab === 'billing') {
+      fetchInvoiceData();
+    }
+  }, [activeTab, fetchInvoiceData]);
+
+  const handlePayInvoice = async (invoiceId) => {
+    setInvoiceError('');
+    setPaymentLoading(true);
+
+    try {
+      const result = await billingAPI.processPayment(providerId, invoiceId, {
         paymentMethod: 'bank_transfer'
       });
 
       if (result.success) {
-        await fetchInvoiceData();
+        await fetchInvoiceData(true);
       } else {
-        setInvoiceError(result.error || 'Payment request failed.');
+        setInvoiceError(result.error || 'Payment could not be completed.');
       }
     } catch {
-      setInvoiceError('Error processing payment request.');
+      setInvoiceError('Payment could not be completed due to a network error.');
     } finally {
       setPaymentLoading(false);
     }
@@ -373,11 +461,11 @@ const ProviderDashboard = ({ setToken }) => {
           </li>
           <li className="nav-item" role="presentation">
             <button
-              className={`nav-link ${activeTab === 'invoices' ? 'active' : ''}`}
-              onClick={() => setActiveTab('invoices')}
+              className={`nav-link ${activeTab === 'billing' ? 'active' : ''}`}
+              onClick={() => setActiveTab('billing')}
               type="button"
             >
-              Invoices
+              Billing
             </button>
           </li>
         </ul>
@@ -391,9 +479,6 @@ const ProviderDashboard = ({ setToken }) => {
                   Provider #{providerId} · Registered since {formatDate(providerKpis.registeredSince)}
                 </p>
               </div>
-              <button className="btn btn-outline-light btn-sm" onClick={fetchAnalyticsSummary} disabled={analyticsLoading}>
-                Refresh
-              </button>
             </div>
 
             {analyticsError && <div className="alert alert-warning">{analyticsError}</div>}
@@ -508,122 +593,117 @@ const ProviderDashboard = ({ setToken }) => {
           </section>
         )}
 
-        {activeTab === 'invoices' && (
+        {activeTab === 'billing' && (
           <section>
             <div className="d-flex flex-wrap justify-content-between align-items-start gap-3 mb-4">
               <div>
                 <h3 className="mb-1">Invoices</h3>
                 <p className="analytics-subtle mb-0">Billing information for provider #{providerId}</p>
               </div>
-              <button className="btn btn-primary" onClick={fetchInvoiceData} disabled={invoiceLoading}>
-                {invoiceLoading ? 'Loading...' : 'Load Invoice'}
-              </button>
             </div>
 
-            {invoiceError && <div className="alert alert-danger">{invoiceError}</div>}
-
-            {invoiceLoading ? (
+            {invoiceLoading || billingSummaryLoading ? (
               <div className="text-center p-5">
                 <div className="spinner-border" role="status">
                   <span className="visually-hidden">Loading...</span>
                 </div>
               </div>
-            ) : invoiceData ? (
-              <>
-                <div className="analytics-panel mb-4">
-                  <div className="d-flex flex-wrap justify-content-between align-items-center gap-3 mb-3">
-                    <h5 className="mb-0">Current Invoice</h5>
-                    <span className={`badge bg-${invoiceData.status === 'paid' ? 'success' : 'warning'}`}>
-                      {invoiceData.status}
-                    </span>
-                  </div>
-
-                  <div className="row">
-                    <div className="col-md-6">
-                      <table className="table table-borderless">
-                        <tbody>
-                          <tr>
-                            <td><strong>Invoice ID:</strong></td>
-                            <td>{invoiceData.invoice_id}</td>
-                          </tr>
-                          <tr>
-                            <td><strong>Billing Period:</strong></td>
-                            <td>{invoiceData.billing_period?.start} - {invoiceData.billing_period?.end}</td>
-                          </tr>
-                          <tr>
-                            <td><strong>Event Count:</strong></td>
-                            <td>{invoiceData.event_count}</td>
-                          </tr>
-                          <tr>
-                            <td><strong>Due Date:</strong></td>
-                            <td>{invoiceData.due_date}</td>
-                          </tr>
-                        </tbody>
-                      </table>
-                    </div>
-                    <div className="col-md-6">
-                      <table className="table table-borderless">
-                        <tbody>
-                          <tr>
-                            <td><strong>Subtotal:</strong></td>
-                            <td>€{invoiceData.subtotal?.toFixed(2)}</td>
-                          </tr>
-                          <tr>
-                            <td><strong>Tax:</strong></td>
-                            <td>€{invoiceData.tax_amount?.toFixed(2)}</td>
-                          </tr>
-                          <tr>
-                            <td><strong>Grand Total:</strong></td>
-                            <td><h4 className="text-success mb-0">€{invoiceData.grand_total?.toFixed(2)}</h4></td>
-                          </tr>
-                        </tbody>
-                      </table>
-                    </div>
-                  </div>
-
-                  {invoiceData.status !== 'paid' && (
-                    <button className="btn btn-success" onClick={handleRequestPayment} disabled={paymentLoading}>
-                      {paymentLoading ? 'Processing...' : 'Request Payment'}
-                    </button>
-                  )}
-                </div>
-
-                {invoiceHistory.length > 0 && (
-                  <div className="analytics-panel">
-                    <h5 className="mb-3">Invoice History</h5>
-                    <div className="table-responsive">
-                      <table className="table table-hover">
-                        <thead>
-                          <tr>
-                            <th>Invoice ID</th>
-                            <th>Period</th>
-                            <th>Amount</th>
-                            <th>Status</th>
-                            <th>Due Date</th>
-                          </tr>
-                        </thead>
-                        <tbody>
-                          {invoiceHistory.map((invoice) => (
-                            <tr key={invoice.invoice_id}>
-                              <td>{invoice.invoice_id}</td>
-                              <td>{invoice.billing_period}</td>
-                              <td>€{parseFloat(invoice.grand_total).toFixed(2)}</td>
-                              <td>
-                                <span className={`badge bg-${invoice.status === 'paid' ? 'success' : 'warning'}`}>
-                                  {invoice.status}
-                                </span>
-                              </td>
-                              <td>{invoice.due_date}</td>
-                            </tr>
-                          ))}
-                        </tbody>
-                      </table>
-                    </div>
-                  </div>
-                )}
-              </>
             ) : (
-              <div className="alert alert-info">No invoice data loaded yet.</div>
+              <>
+                <div className="row g-3 mb-4">
+                  <div className="col-lg-6">
+                    <div className="analytics-panel h-100">
+                      <div className="d-flex flex-wrap justify-content-between align-items-center gap-3 mb-3">
+                        <h5 className="mb-0">Current Usage & Estimated Cost</h5>
+                      </div>
+
+                      {billingSummary?.current_usage ? (
+                        <div className="table-responsive">
+                          <table className="table table-borderless mb-0">
+                            <tbody>
+                              <tr>
+                                <td><strong>Billing Period Start Date</strong></td>
+                                <td>{billingSummary.current_usage.billing_period}</td>
+                              </tr>
+                              <tr>
+                                <td><strong>Successful Reservations</strong></td>
+                                <td>{billingSummary.current_usage.successful_reservations_current_month}</td>
+                              </tr>
+                              <tr>
+                                <td><strong>Monthly Fee</strong></td>
+                                <td>€{billingSummary.current_usage.monthly_fee.toFixed(2)}</td>
+                              </tr>
+                              <tr>
+                                <td><strong>Reservation Fee</strong></td>
+                                <td>€{billingSummary.current_usage.reservation_price.toFixed(2)} per reservation</td>
+                              </tr>
+                              <tr>
+                                <td><strong>Estimated Total</strong></td>
+                                <td><strong>€{billingSummary.current_usage.estimated_amount.toFixed(2)}</strong></td>
+                              </tr>
+                            </tbody>
+                          </table>
+                        </div>
+                      ) : (
+                        <div className="alert alert-info mb-0">Current billing usage is not available yet.</div>
+                      )}
+                    </div>
+                  </div>
+
+                </div>
+                <div className="analytics-panel">
+                  <h5 className="mb-3">Invoice Catalog</h5>
+                  <div className="table-responsive">
+                    <table className="table table-hover">
+                      <thead>
+                        <tr>
+                          <th>Invoice ID</th>
+                          <th>Period</th>
+                          <th>Amount</th>
+                          <th>Status</th>
+                          <th>Due Date</th>
+                          <th></th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {invoiceCatalog.map((invoice) => (
+                          <tr key={invoice.invoice_id}>
+                            <td>{invoice.invoice_id}</td>
+                          <td>{formatDate(invoice.billing_period_start)} - {formatDate(invoice.billing_period_end)}</td>
+                          <td>€{parseFloat(invoice.total_amount).toFixed(2)}</td>
+                          <td>
+                            <span className={`badge bg-${invoice.status === 'PAID' ? 'success' : 'warning'}`}>
+                              {invoice.status}
+                            </span>
+                          </td>
+                          <td>{formatDate(invoice.due_date)}</td>
+                            <td className="text-end">
+                              {invoice.status === 'PENDING' ? (
+                                <button
+                                  type="button"
+                                  className="btn btn-sm btn-outline-primary"
+                                  onClick={() => handlePayInvoice(invoice.invoice_id)}
+                                  disabled={paymentLoading}
+                                >
+                                  {paymentLoading ? 'Processing...' : 'Pay'}
+                                </button>
+                              ) : null}
+                            </td>
+                          </tr>
+                        ))}
+
+                        {invoiceCatalog.length === 0 && (
+                          <tr>
+                            <td colSpan={6} className="text-center text-muted py-4">
+                              No past invoices available yet. Current month invoices are hidden until next month.
+                            </td>
+                          </tr>
+                        )}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              </>
             )}
           </section>
         )}

@@ -1,7 +1,3 @@
--- Billing_Service Database Schema
--- Database: billing_db
--- Stores billable events and invoices for providers
-
 -- Billing Service database schema and mock billing data
 -- Database: billing_db
 
@@ -114,6 +110,9 @@ CREATE TABLE IF NOT EXISTS billing_metadata (
   INDEX idx_updated_at (updated_at)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
+INSERT IGNORE INTO pricing_config (cost_per_reservation, cost_per_charging_hour, setup_fee, active)
+VALUES (0.50, 1.00, 0.00, 1);
+
 INSERT IGNORE INTO provider_pricing (provider_id, monthly_fee, reservation_price)
 VALUES (1, 15.00, 0.10);
 
@@ -134,7 +133,7 @@ INSERT INTO invoices (
 )
 VALUES
   (1, '2026-01-01', '2026-01-31', 28, 15.00, 0.10, 18.80, 0.00, 18.80, 'PAID', '2026-02-01 10:00:00', '2026-02-28', '2026-02-03 11:30:00'),
-  (1, '2026-02-01', '2026-02-28', 30, 15.00, 0.10, 18.00, 0.00, 18.00, 'PAID', '2026-03-01 10:00:00', '2026-03-31', '2026-03-04 09:45:00'),
+  (1, '2026-02-01', '2026-02-29', 30, 15.00, 0.10, 18.00, 0.00, 18.00, 'PAID', '2026-03-01 10:00:00', '2026-03-31', '2026-03-04 09:45:00'),
   (1, '2026-03-01', '2026-03-31', 22, 15.00, 0.10, 17.20, 0.00, 17.20, 'PENDING', '2026-04-01 10:00:00', '2026-04-30', NULL),
   (1, '2026-04-01', '2026-04-30', 34, 15.00, 0.10, 18.40, 0.00, 18.40, 'PAID', '2026-05-01 10:00:00', '2026-05-31', '2026-05-02 12:00:00'),
   (1, '2026-05-01', '2026-05-31', 25, 15.00, 0.10, 17.50, 0.00, 17.50, 'PENDING', '2026-06-01 10:00:00', '2026-06-30', NULL)
@@ -183,4 +182,3 @@ ON DUPLICATE KEY UPDATE
   reservation_price = VALUES(reservation_price),
   estimated_amount = VALUES(estimated_amount),
   updated_at = VALUES(updated_at);
-
