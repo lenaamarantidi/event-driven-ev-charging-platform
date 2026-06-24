@@ -1740,4 +1740,6 @@ process.on('SIGINT', async () => {
   }
 });
 
+// Export constants for external use (e.g., Frontend Service)
+module.exports = app;
 module.exports = app;

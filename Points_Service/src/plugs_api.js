@@ -226,8 +226,8 @@ function normalizePoint(rawPoint, provider) {
     return {
       id: p.chargerId,
       provider_name: p.providerName,
-      lat: p.geo?.[0],
-      lon: p.geo?.[1],
+      lat: p.geo?.[1],
+      lon: p.geo?.[0],
       capacity: p.cap,
       price: p.pricePerKwh,
       status: p.currentStatus,
