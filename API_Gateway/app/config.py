@@ -12,7 +12,7 @@ class Settings(BaseSettings):
     APP_NAME: str = "API Gateway"
     APP_VERSION: str = "1.0.0"
     DEBUG: bool = os.getenv("DEBUG", "false").lower() == "true"
-    PORT: int = int(os.getenv("PORT", "8000"))
+    PORT: int = int(os.getenv("PORT", "4411"))
     HOST: str = os.getenv("HOST", "0.0.0.0")
     LOG_LEVEL: str = os.getenv("LOG_LEVEL", "INFO")
     
