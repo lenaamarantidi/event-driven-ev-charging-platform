@@ -11,6 +11,53 @@
 
 const { pool } = require('./db');
 
+const PERIODS = {
+  '7d': 7,
+  '30d': 30,
+  '90d': 90,
+  monthly: 30,
+  '6months': 183,
+  yearly: 365,
+  all: null
+};
+
+function buildAnalyticsFilters(query = {}) {
+  const clauses = [];
+  const params = [];
+  const providerId = query.providerId || query.provider || null;
+  const period = query.period || '6months';
+  const days = Object.prototype.hasOwnProperty.call(PERIODS, period)
+    ? PERIODS[period]
+    : PERIODS['6months'];
+
+  if (providerId && providerId !== 'all') {
+    const numProviderId = parseInt(providerId, 10);
+    if (!Number.isNaN(numProviderId)) {
+      clauses.push('providerId = ?');
+      params.push(numProviderId);
+    }
+  }
+
+  if (query.startDate) {
+    clauses.push('timestamp >= ?');
+    params.push(query.startDate);
+  } else if (days !== null) {
+    clauses.push(`timestamp >= DATE_SUB(NOW(), INTERVAL ? DAY)`);
+    params.push(days);
+  }
+
+  if (query.endDate) {
+    clauses.push('timestamp <= ?');
+    params.push(query.endDate);
+  }
+
+  return {
+    where: clauses.length > 0 ? `WHERE ${clauses.join(' AND ')}` : '',
+    params,
+    period
+  };
+}
+
 /**
  * GET /analytics/providers/:providerId
  * Get provider KPI metrics
@@ -125,17 +172,29 @@ async function getProviderTimeseries(req, res) {
  */
 async function getGlobalAnalytics(req, res) {
   try {
+    const filters = buildAnalyticsFilters(req.query);
+    const providerFilter = req.query.providerId || req.query.provider || null;
+
     // Total users and providers
     const [users] = await pool.query(`SELECT COUNT(*) as total FROM user_registrations`);
-    const [providers] = await pool.query(`SELECT COUNT(*) as total FROM provider_registrations`);
+    const [providers] = await pool.query(
+      providerFilter && providerFilter !== 'all'
+        ? `SELECT COUNT(*) as total FROM provider_registrations WHERE providerId = ?`
+        : `SELECT COUNT(*) as total FROM provider_registrations`,
+      providerFilter && providerFilter !== 'all' ? [parseInt(providerFilter, 10)] : []
+    );
 
     // Reservation stats
     const [reservationStats] = await pool.query(
       `SELECT
         COUNT(*) as totalReservations,
         SUM(CASE WHEN status = 'success' THEN 1 ELSE 0 END) as successfulReservations,
-        SUM(CASE WHEN status = 'failed' THEN 1 ELSE 0 END) as failedReservations
-       FROM reservation_events`
+        SUM(CASE WHEN status = 'failed' THEN 1 ELSE 0 END) as failedReservations,
+        COUNT(DISTINCT userId) as uniqueUsers,
+        COUNT(DISTINCT pointId) as uniquePoints
+       FROM reservation_events
+       ${filters.where}`,
+      filters.params
     );
 
     const totalUsers = users[0]?.total || 0;
@@ -143,16 +202,22 @@ async function getGlobalAnalytics(req, res) {
     const totalReservations = reservationStats[0]?.totalReservations || 0;
     const successfulReservations = reservationStats[0]?.successfulReservations || 0;
     const failedReservations = reservationStats[0]?.failedReservations || 0;
+    const uniqueUsers = reservationStats[0]?.uniqueUsers || 0;
+    const uniquePoints = reservationStats[0]?.uniquePoints || 0;
     const successRate = totalReservations > 0
       ? ((successfulReservations / totalReservations) * 100).toFixed(2)
       : 0;
 
     return res.json({
+      period: filters.period,
+      providerId: providerFilter || 'all',
       totalUsers,
       totalProviders,
       totalReservations,
       successfulReservations,
       failedReservations,
+      uniqueUsers,
+      uniquePoints,
       successRate: parseFloat(successRate)
     });
   } catch (err) {
@@ -168,18 +233,22 @@ async function getGlobalAnalytics(req, res) {
  */
 async function getGlobalTimeseries(req, res) {
   try {
-    const { period = '6months' } = req.query;
+    const filters = buildAnalyticsFilters(req.query);
 
     // Reservations and users per month
     const [reservationData] = await pool.query(
       `SELECT
-        DATE_FORMAT(timestamp, '%Y-%m') as month,
+        DATE_FORMAT(timestamp, '%Y-%m-%d') as bucket,
         COUNT(*) as reservations,
-        COUNT(DISTINCT userId) as uniqueUsers
+        SUM(CASE WHEN status = 'success' THEN 1 ELSE 0 END) as successfulReservations,
+        SUM(CASE WHEN status = 'failed' THEN 1 ELSE 0 END) as failedReservations,
+        COUNT(DISTINCT userId) as uniqueUsers,
+        COUNT(DISTINCT pointId) as uniquePoints
        FROM reservation_events
-       WHERE timestamp >= DATE_SUB(NOW(), INTERVAL 6 MONTH)
-       GROUP BY DATE_FORMAT(timestamp, '%Y-%m')
-       ORDER BY month ASC`
+       ${filters.where}
+       GROUP BY DATE_FORMAT(timestamp, '%Y-%m-%d')
+       ORDER BY bucket ASC`,
+      filters.params
     );
 
     // Providers per month
@@ -194,14 +263,26 @@ async function getGlobalTimeseries(req, res) {
     );
 
     return res.json({
-      period: '6months',
+      period: filters.period,
       reservationsPerMonth: reservationData.map(row => ({
-        month: row.month,
+        month: row.bucket,
         count: row.reservations
       })),
+      successfulReservationsPerMonth: reservationData.map(row => ({
+        month: row.bucket,
+        count: row.successfulReservations
+      })),
+      failedReservationsPerMonth: reservationData.map(row => ({
+        month: row.bucket,
+        count: row.failedReservations
+      })),
       usersPerMonth: reservationData.map(row => ({
-        month: row.month,
+        month: row.bucket,
         count: row.uniqueUsers
+      })),
+      pointsPerMonth: reservationData.map(row => ({
+        month: row.bucket,
+        count: row.uniquePoints
       })),
       providersPerMonth: providerData.map(row => ({
         month: row.month,
@@ -221,6 +302,7 @@ async function getGlobalTimeseries(req, res) {
  */
 async function getGlobalRankings(req, res) {
   try {
+    const filters = buildAnalyticsFilters(req.query);
     // Top 3 providers of the last week
     const [topProviders] = await pool.query(
       `SELECT
@@ -228,10 +310,11 @@ async function getGlobalRankings(req, res) {
         providerName,
         COUNT(*) as reservationCount
        FROM reservation_events
-       WHERE timestamp >= DATE_SUB(NOW(), INTERVAL 7 DAY)
+       ${filters.where}
        GROUP BY providerId, providerName
        ORDER BY reservationCount DESC
-       LIMIT 3`
+       LIMIT 3`,
+      filters.params
     );
 
     // Full ranking of all providers
@@ -241,10 +324,13 @@ async function getGlobalRankings(req, res) {
         providerName,
         COUNT(*) as totalReservations,
         SUM(CASE WHEN status = 'success' THEN 1 ELSE 0 END) as successfulReservations,
+        SUM(CASE WHEN status = 'failed' THEN 1 ELSE 0 END) as failedReservations,
         COUNT(DISTINCT userId) as uniqueUsers
        FROM reservation_events
+       ${filters.where}
        GROUP BY providerId, providerName
-       ORDER BY totalReservations DESC`
+       ORDER BY totalReservations DESC`,
+      filters.params
     );
 
     return res.json({
@@ -260,6 +346,10 @@ async function getGlobalRankings(req, res) {
         providerName: p.providerName,
         totalReservations: p.totalReservations,
         successfulReservations: p.successfulReservations,
+        failedReservations: p.failedReservations,
+        successRate: p.totalReservations > 0
+          ? Number(((p.successfulReservations / p.totalReservations) * 100).toFixed(2))
+          : 0,
         uniqueUsers: p.uniqueUsers
       }))
     });

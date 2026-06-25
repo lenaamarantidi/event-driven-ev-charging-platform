@@ -3,6 +3,18 @@ import axios from 'axios';
 import { getServiceURL } from '../config';
 
 const Auth = ({ setToken, setUserRole }) => {
+  const operatorIdentifiers = (
+    import.meta.env.VITE_OPERATOR_IDENTIFIERS ||
+    'operator,admin,saas-operator,operator@charger.io,admin@charger.io'
+  )
+    .split(',')
+    .map((value) => value.trim().toLowerCase())
+    .filter(Boolean);
+
+  const isOperatorIdentifier = (value) => (
+    operatorIdentifiers.includes(String(value || '').trim().toLowerCase())
+  );
+
   const [isLogin, setIsLogin] = useState(true);
   const [role, setRole] = useState('ev_user');
   const [formData, setFormData] = useState({
@@ -61,9 +73,15 @@ const Auth = ({ setToken, setUserRole }) => {
     }
 
     if (isLogin) {
+      const loginIdentifier = formData.login_email.trim();
+      const payload = { password: formData.password };
+      if (loginIdentifier.includes('@')) {
+        payload.email = loginIdentifier;
+      } else {
+        payload.username = loginIdentifier;
+      }
       return {
-        email: formData.login_email.trim(),
-        password: formData.password
+        ...payload
       };
     }
 
@@ -104,8 +122,10 @@ const Auth = ({ setToken, setUserRole }) => {
         } else {
           localStorage.setItem('username', formData.username.trim() || formData.login_email.trim());
         }
+        const resolvedRole = res.data.role ||
+          (role === 'ev_user' && isOperatorIdentifier(formData.login_email) ? 'operator' : role);
         setToken(token);
-        setUserRole(role === 'provider' ? 'provider' : 'ev_user');
+        setUserRole(resolvedRole);
       } else {
         alert(`${role === 'provider' ? 'Provider account' : 'Account'} created! Please login.`);
         setIsLogin(true);
@@ -325,12 +345,13 @@ const Auth = ({ setToken, setUserRole }) => {
             <>
               {isLogin ? (
                 <div className="mb-3">
-                  <label>Email</label>
+                  <label>Email or Username</label>
                   <input
-                    type="email"
+                    type="text"
                     className="form-control"
                     value={formData.login_email}
                     onChange={handleFieldChange('login_email')}
+                    placeholder="Email or username"
                     required
                   />
                 </div>

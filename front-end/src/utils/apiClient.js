@@ -235,10 +235,16 @@ export const analyticsAPI = {
    * GET /api/analytics/global?period=monthly
    * Λήψη συνολικών analytics του συστήματος
    */
-  getGlobalAnalytics: async (period = 'monthly') => {
+  getGlobalAnalytics: async (period = 'monthly', filters = {}) => {
     try {
       const api = createApiInstance(SERVICES.analytics);
-      const response = await api.get(`/global?period=${period}`, getAuthHeaders());
+      const params = new URLSearchParams({
+        period,
+        ...(filters.providerId && filters.providerId !== 'all' && { providerId: filters.providerId }),
+        ...(filters.startDate && { startDate: filters.startDate }),
+        ...(filters.endDate && { endDate: filters.endDate })
+      }).toString();
+      const response = await api.get(`/global?${params}`, getAuthHeaders());
       return {
         success: true,
         data: response.data
@@ -256,10 +262,16 @@ export const analyticsAPI = {
    * GET /api/analytics/global/timeseries
    * Operator six-month analytics.
    */
-  getGlobalTimeseries: async () => {
+  getGlobalTimeseries: async (period = '6months', filters = {}) => {
     try {
       const api = createApiInstance(SERVICES.analytics);
-      const response = await api.get('/global/timeseries', getAuthHeaders());
+      const params = new URLSearchParams({
+        period,
+        ...(filters.providerId && filters.providerId !== 'all' && { providerId: filters.providerId }),
+        ...(filters.startDate && { startDate: filters.startDate }),
+        ...(filters.endDate && { endDate: filters.endDate })
+      }).toString();
+      const response = await api.get(`/global/timeseries?${params}`, getAuthHeaders());
       return {
         success: true,
         data: response.data
@@ -277,10 +289,16 @@ export const analyticsAPI = {
    * GET /api/analytics/global/rankings
    * Operator provider rankings.
    */
-  getGlobalRankings: async () => {
+  getGlobalRankings: async (period = '6months', filters = {}) => {
     try {
       const api = createApiInstance(SERVICES.analytics);
-      const response = await api.get('/global/rankings', getAuthHeaders());
+      const params = new URLSearchParams({
+        period,
+        ...(filters.providerId && filters.providerId !== 'all' && { providerId: filters.providerId }),
+        ...(filters.startDate && { startDate: filters.startDate }),
+        ...(filters.endDate && { endDate: filters.endDate })
+      }).toString();
+      const response = await api.get(`/global/rankings?${params}`, getAuthHeaders());
       return {
         success: true,
         data: response.data
@@ -507,9 +525,12 @@ export const pointsAPI = {
   getAll: async (params = {}) => {
     try {
       const api = createApiInstance(SERVICES.points);
+      const cleanParams = Object.fromEntries(
+        Object.entries(params).filter(([, value]) => value !== undefined && value !== null && value !== '' && value !== 'all')
+      );
       const response = await api.get('', {
         ...getAuthHeaders(),
-        params
+        params: cleanParams
       });
       return {
         success: true,

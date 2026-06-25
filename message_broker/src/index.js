@@ -18,6 +18,8 @@ app.use(express.json());
 
 const PORT = Number(process.env.PORT || 3003);
 const RABBITMQ_URL = process.env.RABBITMQ_URL || 'amqp://guest:guest@localhost:5672';
+const RABBITMQ_STARTUP_RETRIES = Number(process.env.RABBITMQ_STARTUP_RETRIES || 30);
+const RABBITMQ_STARTUP_RETRY_DELAY_MS = Number(process.env.RABBITMQ_STARTUP_RETRY_DELAY_MS || 2000);
 
 const EXCHANGES = {
   events: 'business.events',
@@ -223,6 +225,10 @@ function formatError(error) {
   }
 
   return String(error);
+}
+
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 function normalizeEventType(eventType) {
@@ -673,7 +679,21 @@ app.get('/health', (req, res) => {
 
 async function start() {
   try {
-    await ensureRabbitConnection();
+    for (let attempt = 1; attempt <= RABBITMQ_STARTUP_RETRIES; attempt += 1) {
+      try {
+        await ensureRabbitConnection();
+        break;
+      } catch (error) {
+        if (attempt === RABBITMQ_STARTUP_RETRIES) {
+          throw error;
+        }
+        console.warn(
+          `RabbitMQ not ready for message broker startup ` +
+          `(attempt ${attempt}/${RABBITMQ_STARTUP_RETRIES}): ${formatError(error)}`
+        );
+        await sleep(RABBITMQ_STARTUP_RETRY_DELAY_MS);
+      }
+    }
 
     app.listen(PORT, () => {
       console.log(`✓ Message Broker running on port ${PORT}`);
