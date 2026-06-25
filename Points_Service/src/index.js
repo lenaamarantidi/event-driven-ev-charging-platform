@@ -109,7 +109,7 @@ async function fetchPointsFromAdapter(plugKey) {
 }
 
 function normalizeAdapterPoint(point, plugKey) {
-  return {
+  const normalized = {
     id: point.pointId ?? point.id ?? point.uid ?? point.chargerId ?? point.pointid,
     provider_name: point.providerName ?? point.provider_name ?? plugKey,
     lat: point.lat ?? point.geo?.[0] ?? point.coords?.lat,
@@ -118,10 +118,17 @@ function normalizeAdapterPoint(point, plugKey) {
     price: point.kwhPrice ?? point.kwh_price ?? point.pricePerKwh ?? point.kwhRateEur ?? point.price,
     status: point.status ?? point.state ?? point.currentStatus,
     location_name: point.locationName ?? point.location_name,
-    connector: point.connector ?? point.connectorType,
+    connector: point.connector ?? point.connectorType ?? point.chargerType ?? point.type,
     address: point.address,
     reservation_end_time: point.reservationEndTime ?? point.reservation_end_time ?? point.reservationEnd ?? point.reservedUntil,
   };
+  
+  // Log when connector is missing
+  if (!normalized.connector && point.locationName) {
+    console.log(`[normalizeAdapterPoint] WARNING: No connector found for ${point.locationName} (${plugKey}). Available fields: ${Object.keys(point).filter(k => k.toLowerCase().includes('connect') || k.toLowerCase().includes('type')).join(', ')}`);
+  }
+  
+  return normalized;
 }
 
 // ============== DATABASE CONFIGURATION ==============
