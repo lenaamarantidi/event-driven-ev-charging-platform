@@ -4,8 +4,8 @@ services:
     image: rabbitmq:3.12-management-alpine
     container_name: saasplug-rabbitmq
     ports:
-      - "5672:5672"    # AMQP port
-      - "15672:15672"  # Management UI
+      - "5523:5672"    # AMQP port
+      - "5524:15672"  # Management UI
     environment:
       RABBITMQ_DEFAULT_USER: guest
       RABBITMQ_DEFAULT_PASS: guest
@@ -25,7 +25,7 @@ services:
       context: ./message_broker
     container_name: saasplug-message-broker
     ports:
-      - "3003:3003"
+      - "5511:3003"
     environment:
       PORT: 3003
       NODE_ENV: production
@@ -53,7 +53,7 @@ services:
       MYSQL_ROOT_PASSWORD: root
       MYSQL_DATABASE: central
     ports:
-      - "3306:3306"
+      - "6911:3306"
     healthcheck:
       test: ["CMD", "mariadb-admin", "ping", "-h", "localhost", "-uroot", "-proot"]
       interval: 10s
@@ -65,102 +65,74 @@ services:
       - mysql-central-data:/var/lib/mysql
       - ./Points_Service/db/central-db.sql:/docker-entrypoint-initdb.d/01-central.sql
 
-  # MySQL Statistics Database
-  mysql-statistics:
-    image: mysql:8.0
-    container_name: saasplug-mysql-statistics
+  # MariaDB for Red Provider Adapter
+  mariadb-red:
+    image: mariadb:11
+    container_name: saasplug-mariadb-red
     environment:
+      TZ: Europe/Athens
       MYSQL_ROOT_PASSWORD: root
-      MYSQL_DATABASE: saas_statistics
+      MYSQL_DATABASE: red_provider_db
+      MYSQL_USER: red_user
+      MYSQL_PASSWORD: red_pass
     ports:
-      - "3307:3306"
+      - "7011:3306"
     healthcheck:
-      test: mysqladmin ping -h localhost
+      test: ["CMD", "mariadb-admin", "ping", "-h", "localhost", "-uroot", "-proot"]
       interval: 10s
       timeout: 5s
       retries: 5
     networks:
       - saasplug-network
     volumes:
-      - mysql-statistics-data:/var/lib/mysql
-      - ./databases/statistics-db.sql:/docker-entrypoint-initdb.d/01-statistics.sql
+      - mariadb-red-data:/var/lib/mysql
+    restart: unless-stopped
 
-  # MySQL Billing Database
-  mysql-billing:
-    image: mysql:8.0
-    container_name: saasplug-mysql-billing
+  # MariaDB for Green Provider Adapter
+  mariadb-green:
+    image: mariadb:11
+    container_name: saasplug-mariadb-green
     environment:
+      TZ: Europe/Athens
       MYSQL_ROOT_PASSWORD: root
-      MYSQL_DATABASE: saas_billing
+      MYSQL_DATABASE: green_provider_db
+      MYSQL_USER: green_user
+      MYSQL_PASSWORD: green_pass
     ports:
-      - "3308:3306"
+      - "7111:3306"
     healthcheck:
-      test: mysqladmin ping -h localhost
+      test: ["CMD", "mariadb-admin", "ping", "-h", "localhost", "-uroot", "-proot"]
       interval: 10s
       timeout: 5s
       retries: 5
     networks:
       - saasplug-network
     volumes:
-      - mysql-billing-data:/var/lib/mysql
-      - ./databases/billing-db.sql:/docker-entrypoint-initdb.d/01-billing.sql
+      - mariadb-green-data:/var/lib/mysql
+    restart: unless-stopped
 
-  # MySQL Red Provider Database
-  mysql-red:
-    image: mysql:8.0
-    container_name: saasplug-mysql-red
+  # MariaDB for Blue Provider Adapter
+  mariadb-blue:
+    image: mariadb:11
+    container_name: saasplug-mariadb-blue
     environment:
+      TZ: Europe/Athens
       MYSQL_ROOT_PASSWORD: root
-      MYSQL_DATABASE: saas_red
+      MYSQL_DATABASE: blue_provider_db
+      MYSQL_USER: blue_user
+      MYSQL_PASSWORD: blue_pass
     ports:
-      - "3309:3306"
+      - "7211:3306"
     healthcheck:
-      test: mysqladmin ping -h localhost
+      test: ["CMD", "mariadb-admin", "ping", "-h", "localhost", "-uroot", "-proot"]
       interval: 10s
       timeout: 5s
       retries: 5
     networks:
       - saasplug-network
     volumes:
-      - mysql-red-data:/var/lib/mysql
-
-  # MySQL Green Provider Database
-  mysql-green:
-    image: mysql:8.0
-    container_name: saasplug-mysql-green
-    environment:
-      MYSQL_ROOT_PASSWORD: root
-      MYSQL_DATABASE: saas_green
-    ports:
-      - "3310:3306"
-    healthcheck:
-      test: mysqladmin ping -h localhost
-      interval: 10s
-      timeout: 5s
-      retries: 5
-    networks:
-      - saasplug-network
-    volumes:
-      - mysql-green-data:/var/lib/mysql
-
-  # MySQL Blue Provider Database
-  mysql-blue:
-    image: mysql:8.0
-    container_name: saasplug-mysql-blue
-    environment:
-      MYSQL_ROOT_PASSWORD: root
-      MYSQL_DATABASE: saas_blue
-    ports:
-      - "3311:3306"
-    healthcheck:
-      test: mysqladmin ping -h localhost
-      interval: 10s
-      timeout: 5s
-      retries: 5
-    networks:
-      - saasplug-network
-    volumes:
-      - mysql-blue-data:/var/lib/mysql
+      - mariadb-blue-data:/var/lib/mysql
+    restart: unless-stopped
 
   # MariaDB Database for Reservation Service
   mariadb-reservations:
@@ -172,7 +144,7 @@ services:
       MYSQL_USER: reservation_user
       MYSQL_PASSWORD: reservation_pass
     ports:
-      - "3320:3306"
+      - "7311:3306"
     healthcheck:
       test: ["CMD", "mariadb-admin", "ping", "-h", "localhost", "-uroot", "-proot"]
       interval: 10s
@@ -197,7 +169,7 @@ services:
       MYSQL_USER: provider_user
       MYSQL_PASSWORD: provider_pass
     ports:
-      - "3312:3306"
+      - "7411:3306"
     healthcheck:
       test: ["CMD", "mariadb-admin", "ping", "-h", "localhost", "-uroot", "-proot"]
       interval: 10s
@@ -216,7 +188,7 @@ services:
       context: ./Points_Service
     container_name: saasplug-central
     ports:
-      - "3001:3001"
+      - "5512:3001"
     environment:
       PORT: 3001
       SERVICE: central
@@ -250,7 +222,7 @@ services:
       context: ./Reservation_Service
     container_name: saasplug-reservation
     ports:
-      - "3009:3009"
+      - "5513:3009"
     environment:
       PORT: 3009
       NODE_ENV: production
@@ -286,7 +258,7 @@ services:
       context: ./Billing_Service
     container_name: saasplug-billing
     ports:
-      - "3103:3103"
+      - "5514:3103"
     environment:
       PORT: 3103
       NODE_ENV: production
@@ -319,7 +291,7 @@ services:
       MYSQL_USER: billing_user
       MYSQL_PASSWORD: billing_pass
     ports:
-      - "3315:3306"
+      - "7911:3306"
     healthcheck:
       test: ["CMD", "mariadb-admin", "ping", "-h", "localhost", "-uroot", "-proot"]
       interval: 10s
@@ -338,7 +310,7 @@ services:
       context: ./Payment_Service
     container_name: saasplug-payment
     ports:
-      - "3107:3107"
+      - "5515:3107"
     environment:
       PORT: 3107
       NODE_ENV: production
@@ -367,7 +339,7 @@ services:
       MYSQL_USER: payment_user
       MYSQL_PASSWORD: payment_pass
     ports:
-      - "3316:3306"
+      - "8111:3306"
     healthcheck:
       test: ["CMD", "mariadb-admin", "ping", "-h", "localhost", "-uroot", "-proot"]
       interval: 10s
@@ -386,7 +358,7 @@ services:
       context: ./Provider_Management_Service
     container_name: saasplug-provider-mgmt
     ports:
-      - "3101:3101"
+      - "5516:3101"
     environment:
       PORT: 3101
       NODE_ENV: production
@@ -411,7 +383,7 @@ services:
       MYSQL_USER: auth_user
       MYSQL_PASSWORD: auth_pass
     ports:
-      - "3314:3306"
+      - "8311:3306"
     healthcheck:
       test: ["CMD", "mariadb-admin", "ping", "-h", "localhost", "-uroot", "-proot"]
       interval: 10s
@@ -430,7 +402,7 @@ services:
       context: ./Auth_Service
     container_name: saasplug-auth
     ports:
-      - "3100:3100"
+      - "5517:3100"
     environment:
       PORT: 3100
       NODE_ENV: production
@@ -458,7 +430,7 @@ services:
       MYSQL_USER: analytics_user
       MYSQL_PASSWORD: analytics_pass
     ports:
-      - "3313:3306"
+      - "8511:3306"
     healthcheck:
       test: ["CMD", "mariadb-admin", "ping", "-h", "localhost", "-uroot", "-proot"]
       interval: 10s
@@ -477,7 +449,7 @@ services:
       context: ./Analytics_Service
     container_name: saasplug-analytics
     ports:
-      - "3106:3106"
+      - "5518:3106"
     environment:
       PORT: 3106
       NODE_ENV: production
@@ -505,7 +477,7 @@ services:
       context: ./Map_UI_Service
     container_name: saasplug-map
     ports:
-      - "3105:3105"
+      - "5519:3105"
     environment:
       PORT: 3105
       NODE_ENV: production
@@ -546,10 +518,15 @@ services:
       context: ./Provider_Adapter_redPlug
     container_name: saasplug-provider-adapter-redplug
     ports:
-      - "3111:3111"
+      - "5520:3111"
     environment:
       PORT: 3111
       NODE_ENV: production
+      DB_HOST: mariadb-red
+      DB_PORT: 3306
+      DB_USER: red_user
+      DB_PASSWORD: red_pass
+      DB_NAME: red_provider_db
       RABBITMQ_URL: amqp://guest:guest@rabbitmq:5672
       ADAPTER_SYNC_REQUEST_EXCHANGE: adapter.sync.requests
       REDPLUG_API_URL: https://davinci.softlab.ntua.gr/saas26/redPlug/api
@@ -557,6 +534,9 @@ services:
       POINTS_SERVICE_URL: http://central-service:3001
       ADAPTER_SYNC_INTERVAL_MS: 86400000
       SYNC_INGEST_TOKEN: sync-ingest-dev-token
+    depends_on:
+      mariadb-red:
+        condition: service_healthy
     networks:
       - saasplug-network
     restart: unless-stopped
@@ -566,10 +546,15 @@ services:
       context: ./Provider_Adapter_greenPlug
     container_name: saasplug-provider-adapter-greenplug
     ports:
-      - "3112:3112"
+      - "5521:3112"
     environment:
       PORT: 3112
       NODE_ENV: production
+      DB_HOST: mariadb-green
+      DB_PORT: 3306
+      DB_USER: green_user
+      DB_PASSWORD: green_pass
+      DB_NAME: green_provider_db
       RABBITMQ_URL: amqp://guest:guest@rabbitmq:5672
       ADAPTER_SYNC_REQUEST_EXCHANGE: adapter.sync.requests
       GREENPLUG_API_URL: https://davinci.softlab.ntua.gr/saas26/greenPlug/api
@@ -577,6 +562,9 @@ services:
       POINTS_SERVICE_URL: http://central-service:3001
       ADAPTER_SYNC_INTERVAL_MS: 86400000
       SYNC_INGEST_TOKEN: sync-ingest-dev-token
+    depends_on:
+      mariadb-green:
+        condition: service_healthy
     networks:
       - saasplug-network
     restart: unless-stopped
@@ -586,10 +574,15 @@ services:
       context: ./Provider_Adapter_bluePlug
     container_name: saasplug-provider-adapter-blueplug
     ports:
-      - "3113:3113"
+      - "5522:3113"
     environment:
       PORT: 3113
       NODE_ENV: production
+      DB_HOST: mariadb-blue
+      DB_PORT: 3306
+      DB_USER: blue_user
+      DB_PASSWORD: blue_pass
+      DB_NAME: blue_provider_db
       RABBITMQ_URL: amqp://guest:guest@rabbitmq:5672
       ADAPTER_SYNC_REQUEST_EXCHANGE: adapter.sync.requests
       BLUEPLUG_API_URL: https://davinci.softlab.ntua.gr/saas26/bluePlug/api
@@ -597,6 +590,53 @@ services:
       POINTS_SERVICE_URL: http://central-service:3001
       ADAPTER_SYNC_INTERVAL_MS: 86400000
       SYNC_INGEST_TOKEN: sync-ingest-dev-token
+    depends_on:
+      mariadb-blue:
+        condition: service_healthy
+    networks:
+      - saasplug-network
+    restart: unless-stopped
+
+  api-gateway:
+    build:
+      context: ./API_Gateway
+    container_name: saasplug-api-gateway
+    ports:
+      - "${API_GATEWAY_PORT}:${API_GATEWAY_PORT}"
+    env_file:
+      - .env
+    environment:
+      PORT: ${API_GATEWAY_PORT}
+      HOST: 0.0.0.0
+    depends_on:
+      - auth-service
+      - provider-management-service
+      - central-service
+      - reservation-service
+      - billing-service
+      - payment-service
+      - analytics-service
+      - map-service
+      - provider-adapter-redplug
+      - provider-adapter-greenplug
+      - provider-adapter-blueplug
+    networks:
+      - saasplug-network
+    restart: unless-stopped
+
+  frontend-service:
+    build:
+      context: ./Frontend_Service
+    container_name: saasplug-frontend
+    ports:
+      - "${FRONTEND_SERVICE_PORT}:${FRONTEND_SERVICE_PORT}"
+    env_file:
+      - .env
+    environment:
+      PORT: ${FRONTEND_SERVICE_PORT}
+      NODE_ENV: production
+    depends_on:
+      - api-gateway
     networks:
       - saasplug-network
     restart: unless-stopped
@@ -608,14 +648,12 @@ networks:
 volumes:
   rabbitmq-data:
   mysql-central-data:
-  mysql-statistics-data:
-  mysql-billing-data:
-  mysql-red-data:
-  mysql-green-data:
-  mysql-blue-data:
   mariadb-reservations-data:
   mariadb-provider-data:
   mariadb-analytics-data:
   mariadb-auth-data:
   mariadb-billing-data:
   mariadb-payment-data:
+  mariadb-red-data:
+  mariadb-green-data:
+  mariadb-blue-data:

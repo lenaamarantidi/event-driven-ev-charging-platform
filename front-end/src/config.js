@@ -6,7 +6,7 @@
  */
 
 // Base URL for the API gateway. Can be overridden with VITE_API_BASE_URL.
-const DEFAULT_API_BASE_URL = import.meta.env.DEV ? '/api' : 'http://127.0.0.1:8001/api';
+const DEFAULT_API_BASE_URL = import.meta.env.DEV ? '/api' : 'http://127.0.0.1:4411/api';
 
 const normalizeApiBase = (base) => base.replace(/\/+$/, '');
 
@@ -24,17 +24,17 @@ const getRuntimeApiBaseCandidates = () => {
 
   const { protocol, hostname } = window.location;
   const candidates = [
-    `${protocol}//${hostname}:8001/api`,
-    `${protocol}//${hostname}:8000/api`
+    `${protocol}//${hostname}:4411/api`,
+    `${protocol}//${hostname}:4411/api`
   ];
 
   // Always include loopback fallbacks because backend services are often bound
   // only to localhost while Vite may be opened via LAN host/IP.
   candidates.push(
-    'http://127.0.0.1:8001/api',
-    'http://127.0.0.1:8000/api',
-    'http://localhost:8001/api',
-    'http://localhost:8000/api'
+    'http://127.0.0.1:4411/api',
+    'http://127.0.0.1:4411/api',
+    'http://localhost:4411/api',
+    'http://localhost:4411/api'
   );
 
   candidates.push(DEFAULT_API_BASE_URL);

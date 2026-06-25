@@ -12,12 +12,14 @@ COPY app ./app
 # Create logs directory
 RUN mkdir -p logs
 
+ARG PORT=4411
+
 # Expose port
-EXPOSE 8000
+EXPOSE ${PORT}
 
 # Health check
 HEALTHCHECK --interval=10s --timeout=5s --retries=5 \
-  CMD python -c "import httpx; httpx.get('http://localhost:8000/health', timeout=5).raise_for_status()" || exit 1
+  CMD python -c "import os, httpx; port = os.getenv('PORT', '4411'); httpx.get(f'http://localhost:{port}/health', timeout=5).raise_for_status()" || exit 1
 
 # Run application
-CMD ["python", "-m", "uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
+CMD ["sh", "-c", "python -m uvicorn app.main:app --host 0.0.0.0 --port ${PORT}"]
