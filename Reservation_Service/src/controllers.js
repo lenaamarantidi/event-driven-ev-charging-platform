@@ -23,6 +23,15 @@ function isValidProvider(providerName) {
   return ['redPlug', 'greenPlug', 'bluePlug'].includes(providerName);
 }
 
+function getProviderId(providerName) {
+  const providerIds = {
+    redPlug: 1,
+    greenPlug: 2,
+    bluePlug: 3
+  };
+  return providerIds[providerName] || null;
+}
+
 async function reserveViaAdapter(providerName, pointId, duration, userId) {
   const base = getAdapterBaseUrl(providerName);
   const response = await axios.post(`${base}/api/reserve`, { pointId, duration, userId }, { timeout: 10000 });
@@ -47,7 +56,7 @@ async function createReservation(params) {
     // Log successful reservation
     await logReservation({
       reservationId,
-      providerId: providerName === 'greenPlug' ? 2 : providerName === 'bluePlug' ? 3 : 1,
+      providerId: getProviderId(providerName),
       providerName,
       pointId,
       duration,
@@ -68,7 +77,7 @@ async function createReservation(params) {
     try {
       await logReservation({
         reservationId,
-        providerId: providerName === 'greenPlug' ? 2 : providerName === 'bluePlug' ? 3 : 1,
+        providerId: getProviderId(providerName),
         providerName,
         pointId,
         duration,

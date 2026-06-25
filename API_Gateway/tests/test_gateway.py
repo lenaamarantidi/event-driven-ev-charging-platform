@@ -45,7 +45,7 @@ class GatewaySmokeTests(unittest.TestCase):
         self.assertEqual(services["payments"], "http://payment-service:3107")
         self.assertEqual(services["analytics"], "http://analytics-service:3106")
         self.assertEqual(services["map"], "http://map-service:3105")
-        self.assertEqual(services["provider_api"], "http://provider-api-service:3200")
+        self.assertEqual(services["provider_api"], "http://provider-adapter-redplug:3111")
 
     def test_proxy_build_url_preserves_query_string(self):
         url = ProxyService._build_url(

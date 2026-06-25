@@ -1,8 +1,10 @@
--- Mock analytics data for provider dashboard previews.
--- Target provider: providerId = 1, providerName = Test.
+-- Mock analytics data for redPlug provider dashboard previews.
+-- Target provider: providerId = 1, providerName = redPlug.
+-- Period: last 6 months for the 2026-06-25 deployment date.
 --
--- Run against analytics_db, for example:
--- docker exec -i saasplug-mariadb-analytics mariadb -uroot -proot analytics_db < Analytics_Service/db/mock-provider-analytics-seed.sql
+-- deploy.sh creates a temporary redplug_mock_points table from synced central
+-- redPlug points before running this file. The fallback rows below keep the
+-- seed usable when run manually before point sync.
 
 CREATE TABLE IF NOT EXISTS user_registrations (
   id INT(10) UNSIGNED PRIMARY KEY AUTO_INCREMENT,
@@ -56,26 +58,39 @@ CREATE TABLE IF NOT EXISTS global_daily_stats (
   newProviders INT(10) UNSIGNED DEFAULT 0
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
+CREATE TEMPORARY TABLE IF NOT EXISTS redplug_mock_points (
+  seq INT(10) UNSIGNED PRIMARY KEY AUTO_INCREMENT,
+  point_id VARCHAR(255) NOT NULL UNIQUE
+) ENGINE=Memory;
+
+INSERT IGNORE INTO redplug_mock_points (point_id)
+VALUES ('101'), ('102'), ('103'), ('104'), ('105'), ('106'), ('107'), ('108');
+
+DELETE FROM provider_registrations
+WHERE providerId = 1 OR providerName = 'Test';
+
 INSERT INTO provider_registrations (providerId, providerName, createdAt)
-VALUES (1, 'Test', '2026-01-08 09:00:00')
+VALUES (1, 'redPlug', '2026-01-01 09:00:00')
 ON DUPLICATE KEY UPDATE
   providerName = VALUES(providerName),
-  createdAt = LEAST(createdAt, VALUES(createdAt));
+  createdAt = VALUES(createdAt);
 
 INSERT IGNORE INTO user_registrations (userId, createdAt)
 WITH RECURSIVE seq AS (
   SELECT 1 AS n
   UNION ALL
-  SELECT n + 1 FROM seq WHERE n < 42
+  SELECT n + 1 FROM seq WHERE n < 64
 )
 SELECT
-  CONCAT('mock-user-', LPAD(n, 2, '0')),
-  DATE_ADD('2026-01-05', INTERVAL n DAY)
+  CONCAT('redplug-user-', LPAD(n, 2, '0')),
+  TIMESTAMP(DATE_ADD('2026-01-01', INTERVAL (n * 2) DAY), MAKETIME(9 + (n % 9), (n * 11) % 60, 0))
 FROM seq;
 
 DELETE FROM reservation_events
 WHERE providerId = 1
-  AND reservationId LIKE 'mock-provider-1-res-%';
+   OR providerName IN ('Test', 'redPlug')
+   OR reservationId LIKE 'mock-redplug-res-%'
+   OR reservationId LIKE 'mock-provider-1-res-%';
 
 INSERT INTO reservation_events (
   reservationId,
@@ -89,17 +104,26 @@ INSERT INTO reservation_events (
 WITH RECURSIVE seq AS (
   SELECT 1 AS n
   UNION ALL
-  SELECT n + 1 FROM seq WHERE n < 164
+  SELECT n + 1 FROM seq WHERE n < 176
+),
+point_count AS (
+  SELECT GREATEST(COUNT(*), 1) AS total FROM redplug_mock_points
 )
 SELECT
-  CONCAT('mock-provider-1-res-', LPAD(n, 3, '0')),
+  CONCAT('mock-redplug-res-', LPAD(n, 3, '0')),
   1,
-  'Test',
-  CONCAT('mock-user-', LPAD(((n * 5) % 42) + 1, 2, '0')),
-  CONCAT('TEST-CP-', LPAD((n % 8) + 1, 2, '0')),
-  CASE WHEN n % 6 IN (0, 5) THEN 'failed' ELSE 'success' END,
-  TIMESTAMP(DATE_ADD('2026-01-10', INTERVAL n DAY), MAKETIME(8 + (n % 12), (n * 7) % 60, 0))
-FROM seq;
+  'redPlug',
+  CONCAT('redplug-user-', LPAD(((n * 7) % 64) + 1, 2, '0')),
+  (
+    SELECT point_id
+    FROM redplug_mock_points p
+    WHERE p.seq = ((seq.n - 1) % point_count.total) + 1
+    LIMIT 1
+  ),
+  CASE WHEN n % 9 IN (0, 7) THEN 'failed' ELSE 'success' END,
+  TIMESTAMP(DATE_ADD('2026-01-01', INTERVAL n DAY), MAKETIME(7 + (n % 13), (n * 5) % 60, 0))
+FROM seq
+CROSS JOIN point_count;
 
 DELETE FROM provider_daily_stats
 WHERE providerId = 1;
@@ -139,6 +163,7 @@ SELECT
   0,
   0
 FROM reservation_events
+WHERE providerId = 1
 GROUP BY DATE(timestamp);
 
 CREATE TABLE IF NOT EXISTS UsageEvent (
@@ -175,15 +200,15 @@ INSERT INTO UsageEvent (
 WITH RECURSIVE seq AS (
   SELECT 1 AS n
   UNION ALL
-  SELECT n + 1 FROM seq WHERE n < 120
+  SELECT n + 1 FROM seq WHERE n < 176
 )
 SELECT
   1,
-  ((n * 5) % 42) + 1,
-  (n % 8) + 1,
+  ((n * 7) % 64) + 1,
+  ((n - 1) % 8) + 1,
   n,
-  CASE WHEN n % 6 IN (0, 5) THEN 'reservation_failed' ELSE 'reservation_success' END,
-  TIMESTAMP(DATE_ADD('2026-02-01', INTERVAL n DAY), MAKETIME(9 + (n % 10), (n * 5) % 60, 0)),
-  CASE WHEN n % 6 IN (0, 5) THEN 0 ELSE 4.50 + (n % 9) END,
+  CASE WHEN n % 9 IN (0, 7) THEN 'reservation_failed' ELSE 'reservation_success' END,
+  TIMESTAMP(DATE_ADD('2026-01-01', INTERVAL n DAY), MAKETIME(8 + (n % 11), (n * 3) % 60, 0)),
+  CASE WHEN n % 9 IN (0, 7) THEN 0 ELSE 4.20 + (n % 8) END,
   NULL
 FROM seq;
