@@ -30,6 +30,28 @@ OPERATOR_USERNAME="${OPERATOR_USERNAME:-operator}"
 OPERATOR_EMAIL="${OPERATOR_EMAIL:-operator@charger.io}"
 OPERATOR_PASSWORD="${OPERATOR_PASSWORD:-operator123}"
 
+if [ -f "$ROOT_DIR/.env" ]; then
+  set -a
+  . "$ROOT_DIR/.env"
+  set +a
+fi
+
+FRONTEND_SERVICE_PORT="${FRONTEND_SERVICE_PORT:-3311}"
+API_GATEWAY_PORT="${API_GATEWAY_PORT:-4411}"
+BACKEND_BASE_PORT="${BACKEND_BASE_PORT:-5511}"
+MESSAGE_BROKER_HTTP_PORT="${MESSAGE_BROKER_HTTP_PORT:-$BACKEND_BASE_PORT}"
+POINTS_HOST_PORT="${POINTS_HOST_PORT:-$((BACKEND_BASE_PORT + 1))}"
+RESERVATION_HOST_PORT="${RESERVATION_HOST_PORT:-$((BACKEND_BASE_PORT + 2))}"
+BILLING_HOST_PORT="${BILLING_HOST_PORT:-$((BACKEND_BASE_PORT + 3))}"
+PAYMENT_HOST_PORT="${PAYMENT_HOST_PORT:-$((BACKEND_BASE_PORT + 4))}"
+PROVIDER_HOST_PORT="${PROVIDER_HOST_PORT:-$((BACKEND_BASE_PORT + 5))}"
+AUTH_HOST_PORT="${AUTH_HOST_PORT:-$((BACKEND_BASE_PORT + 6))}"
+ANALYTICS_HOST_PORT="${ANALYTICS_HOST_PORT:-$((BACKEND_BASE_PORT + 7))}"
+MAP_HOST_PORT="${MAP_HOST_PORT:-$((BACKEND_BASE_PORT + 8))}"
+REDPLUG_ADAPTER_HOST_PORT="${REDPLUG_ADAPTER_HOST_PORT:-$((BACKEND_BASE_PORT + 9))}"
+GREENPLUG_ADAPTER_HOST_PORT="${GREENPLUG_ADAPTER_HOST_PORT:-$((BACKEND_BASE_PORT + 10))}"
+BLUEPLUG_ADAPTER_HOST_PORT="${BLUEPLUG_ADAPTER_HOST_PORT:-$((BACKEND_BASE_PORT + 11))}"
+
 COMPOSE=(docker compose)
 
 log() {
@@ -98,6 +120,36 @@ run_sql_file() {
   docker exec -i "$container" mariadb -uroot -proot "$database" < "$file"
 }
 
+run_redplug_analytics_seed() {
+  local file="Analytics_Service/db/mock-provider-analytics-seed.sql"
+
+  if [ ! -f "$file" ]; then
+    echo "SQL file not found: $file" >&2
+    exit 1
+  fi
+
+  log "Loading redPlug analytics mock data using synced redPlug point IDs"
+
+  local point_inserts
+  point_inserts="$(
+    docker exec saasplug-mysql-central mariadb -uroot -proot central -N -B \
+      -e "SELECT point_id FROM points WHERE provider_name = 'redPlug' ORDER BY point_id LIMIT 16" \
+      | awk '{ gsub(/\047/, "\047\047"); printf "INSERT IGNORE INTO redplug_mock_points (point_id) VALUES (\047%s\047);\n", $0 }'
+  )"
+
+  if [ -z "$point_inserts" ]; then
+    echo "  No synced redPlug points found; analytics seed will use fallback point IDs."
+  else
+    echo "  Using synced redPlug points for analytics mock events."
+  fi
+
+  {
+    printf '%s\n' "CREATE TEMPORARY TABLE IF NOT EXISTS redplug_mock_points (seq INT(10) UNSIGNED PRIMARY KEY AUTO_INCREMENT, point_id VARCHAR(255) NOT NULL UNIQUE) ENGINE=Memory;"
+    printf '%s\n' "$point_inserts"
+    cat "$file"
+  } | docker exec -i saasplug-mariadb-analytics mariadb -uroot -proot analytics_db
+}
+
 seed_operator_user() {
   log "Creating reserved operator user in Auth DB"
 
@@ -131,7 +183,7 @@ seed_providers() {
 
 repopulate_points() {
   log "Loading charging points from provider adapters into central Points DB"
-  curl -fsS -X POST "http://localhost:3001/db/repopulate" \
+  curl -fsS -X POST "http://localhost:${POINTS_HOST_PORT}/db/repopulate" \
     -H "Content-Type: application/json" \
     -d '{}' \
     | node -e "let s=''; process.stdin.on('data', d => s += d); process.stdin.on('end', () => { try { console.log(JSON.stringify(JSON.parse(s), null, 2)); } catch (_) { console.log(s); } });"
@@ -166,28 +218,29 @@ main() {
   wait_for_container_health saasplug-mariadb-billing
   wait_for_container_health saasplug-central
 
-  wait_for_http "http://localhost:3100/auth/health"
-  wait_for_http "http://localhost:3101/health"
-  wait_for_http "http://localhost:3106/health"
-  wait_for_http "http://localhost:3103/health"
-  wait_for_http "http://localhost:3111/health"
-  wait_for_http "http://localhost:3112/health"
-  wait_for_http "http://localhost:3113/health"
+  wait_for_http "http://localhost:${AUTH_HOST_PORT}/auth/health"
+  wait_for_http "http://localhost:${PROVIDER_HOST_PORT}/health"
+  wait_for_http "http://localhost:${ANALYTICS_HOST_PORT}/health"
+  wait_for_http "http://localhost:${BILLING_HOST_PORT}/health"
+  wait_for_http "http://localhost:${REDPLUG_ADAPTER_HOST_PORT}/health"
+  wait_for_http "http://localhost:${GREENPLUG_ADAPTER_HOST_PORT}/health"
+  wait_for_http "http://localhost:${BLUEPLUG_ADAPTER_HOST_PORT}/health"
+  wait_for_http "http://localhost:${API_GATEWAY_PORT}/health"
 
   seed_providers
   seed_operator_user
 
-  run_sql_file saasplug-mariadb-analytics analytics_db Analytics_Service/db/mock-provider-analytics-seed.sql
-  run_sql_file saasplug-mariadb-billing billing_db Billing_Service/db/init.sql
-
   repopulate_points
+  run_redplug_analytics_seed
+  run_sql_file saasplug-mariadb-billing billing_db Billing_Service/db/init.sql
 
   log "Deployment data is ready"
   echo "  Backend examples:"
-  echo "    Auth:      http://localhost:3100/auth/health"
-  echo "    Points:    http://localhost:3001/api/points"
-  echo "    Analytics: http://localhost:3106/health"
-  echo "    Billing:   http://localhost:3103/health"
+  echo "    Gateway:   http://localhost:${API_GATEWAY_PORT}/health"
+  echo "    Auth:      http://localhost:${AUTH_HOST_PORT}/auth/health"
+  echo "    Points:    http://localhost:${POINTS_HOST_PORT}/api/points"
+  echo "    Analytics: http://localhost:${ANALYTICS_HOST_PORT}/health"
+  echo "    Billing:   http://localhost:${BILLING_HOST_PORT}/health"
   echo "  Operator credentials:"
   echo "    username: $OPERATOR_USERNAME"
   echo "    email:    $OPERATOR_EMAIL"

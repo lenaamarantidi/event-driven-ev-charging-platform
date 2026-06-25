@@ -16,6 +16,13 @@ NC='\033[0m' # No Color
 # Get the script directory
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 FRONTEND_DIR="$SCRIPT_DIR"
+ROOT_ENV="$FRONTEND_DIR/../.env"
+
+if [ -f "$ROOT_ENV" ]; then
+    set -a
+    . "$ROOT_ENV"
+    set +a
+fi
 
 echo -e "${BLUE}════════════════════════════════════════════════════════════${NC}"
 echo -e "${GREEN}EV Charger Frontend${NC}"

@@ -603,11 +603,18 @@ services:
     container_name: saasplug-api-gateway
     ports:
       - "${API_GATEWAY_PORT}:${API_GATEWAY_PORT}"
-    env_file:
-      - .env
     environment:
       PORT: ${API_GATEWAY_PORT}
       HOST: 0.0.0.0
+      AUTH_SERVICE_URL: http://auth-service:3100
+      PROVIDER_SERVICE_URL: http://provider-management-service:3101
+      POINTS_SERVICE_URL: http://central-service:3001
+      RESERVATION_SERVICE_URL: http://reservation-service:3009
+      BILLING_SERVICE_URL: http://billing-service:3103
+      PAYMENT_SERVICE_URL: http://payment-service:3107
+      ANALYTICS_SERVICE_URL: http://analytics-service:3106
+      MAP_SERVICE_URL: http://map-service:3105
+      PROVIDER_API_SERVICE_URL: http://provider-adapter-redplug:3111
     depends_on:
       - auth-service
       - provider-management-service
@@ -630,8 +637,6 @@ services:
     container_name: saasplug-frontend
     ports:
       - "${FRONTEND_SERVICE_PORT}:${FRONTEND_SERVICE_PORT}"
-    env_file:
-      - .env
     environment:
       PORT: ${FRONTEND_SERVICE_PORT}
       NODE_ENV: production

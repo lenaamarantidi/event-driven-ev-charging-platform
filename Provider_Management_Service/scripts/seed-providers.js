@@ -41,7 +41,8 @@ async function seedProviders() {
         listEndpoint: '/api/points',
         detailsEndpoint: '/api/points/:pointId',
         reserveEndpoint: '/api/reserve',
-        reserveDurationEndpoint: '/api/reserve'
+        reserveDurationEndpoint: '/api/reserve',
+        integrationStatus: 'integrated'
       },
       {
         id: 2,
@@ -54,7 +55,8 @@ async function seedProviders() {
         listEndpoint: '/api/points',
         detailsEndpoint: '/api/points/:pointId',
         reserveEndpoint: '/api/reserve',
-        reserveDurationEndpoint: '/api/reserve'
+        reserveDurationEndpoint: '/api/reserve',
+        integrationStatus: 'integrated'
       },
       {
         id: 3,
@@ -67,9 +69,18 @@ async function seedProviders() {
         listEndpoint: '/api/points',
         detailsEndpoint: '/api/points/:pointId',
         reserveEndpoint: '/api/reserve',
-        reserveDurationEndpoint: '/api/reserve'
+        reserveDurationEndpoint: '/api/reserve',
+        integrationStatus: 'integrated'
       }
     ];
+
+    await connection.execute(
+      `DELETE FROM providers
+       WHERE provider_id IN (1, 2, 3, 4)
+          OR provider_name IN ('Test', 'redPlug', 'greenPlug', 'bluePlug')
+          OR provider_email IN ('test@example.com', 'redplug@example.com', 'greenplug@example.com', 'blueplug@example.com')
+          OR company_tin IN ('123456789', '100000001', '100000002', '100000003')`
+    );
 
     const query = `
       INSERT INTO providers (
@@ -113,7 +124,7 @@ async function seedProviders() {
         provider.tin,
         passwordHash,
         provider.adapter,
-        'integrated',
+        provider.integrationStatus,
         provider.baseUrl,
         provider.apiKey,
         provider.listEndpoint,
@@ -125,6 +136,7 @@ async function seedProviders() {
     }
 
     console.log('Provider password for all seeded providers: password123');
+    console.log('Provider IDs: redPlug=1, greenPlug=2, bluePlug=3');
     
     await connection.end();
     process.exit(0);
