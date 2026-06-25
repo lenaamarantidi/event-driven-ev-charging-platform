@@ -8,7 +8,7 @@ const express = require('express');
 const path = require('path');
 const fs = require('fs');
 const yaml = require('yaml');
-const { getPointsByProvider, getAllPoints } = require('./map_ui');
+const { getAllPointsFromCentral } = require('./map_ui');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -48,30 +48,38 @@ app.get('/provider', (req, res) => {
   res.sendFile(path.join(__dirname, '../pages/provider.html'));
 });
 
-// API endpoint to fetch points by provider with normalization
-app.get('/api/points/:provider', async (req, res) => {
+// API endpoint to fetch points from central service with optional provider filter
+app.get('/api/points', async (req, res) => {
   try {
-    const { provider } = req.params;
-    const data = await getPointsByProvider(provider, { normalize: true });
+    const { provider, status, avail, connectorType, lat, lon, radius, limit, costMin, costMax, powerMin, powerMax, type } = req.query;
+    
+    // Build filters object from query parameters
+    const filters = {};
+    if (provider) filters.provider = provider;
+    if (status) filters.status = status;
+    if (avail) filters.avail = avail;
+    if (connectorType) filters.connectorType = connectorType;
+    if (lat && lon && radius) {
+      filters.lat = lat;
+      filters.lon = lon;
+      filters.radius = radius;
+    }
+    if (limit) filters.limit = limit;
+    if (costMin !== undefined) filters.costMin = costMin;
+    if (costMax !== undefined) filters.costMax = costMax;
+    if (powerMin !== undefined) filters.powerMin = powerMin;
+    if (powerMax !== undefined) filters.powerMax = powerMax;
+    if (type) filters.type = type;
+
+    console.log('[/api/points] Fetching from central with filters:', filters);
+    const data = await getAllPointsFromCentral({ filters });
+    
     res.json(data);
   } catch (err) {
     const status = err.response?.status || 500;
     res.status(status).json({
       error: err.message,
-      provider: req.params.provider
-    });
-  }
-});
-
-// API endpoint to fetch points from all providers with normalization
-app.get('/api/points', async (req, res) => {
-  try {
-    const data = await getAllPoints({ normalize: true });
-    res.json(data);
-  } catch (err) {
-    res.status(500).json({
-      error: 'Failed to fetch points from all providers',
-      details: err.message
+      details: err.response?.data?.error || err.message
     });
   }
 });

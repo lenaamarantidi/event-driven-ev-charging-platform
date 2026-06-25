@@ -215,7 +215,7 @@ function normalizePoint(rawPoint, provider) {
       capacity: p.cap,
       price: p.kwhRateEur,
       status: p.state,
-      connector: p.connectorType,
+      connector: p.connector ?? p.connectorType,
       location_name: p.locationName,
       address: p.address,
       reservation_end_time: normalizeReservationEndTime(p.reservedUntil)
