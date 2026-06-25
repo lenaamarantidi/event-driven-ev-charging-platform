@@ -15,35 +15,37 @@
     body {
       background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
       min-height: 100vh;
-      padding: 20px;
+      padding: 3px;
     }
     .header {
       background: rgba(255, 255, 255, 0.95);
-      padding: 20px 40px;
+      padding: 12px 20px;
       border-radius: 15px;
       box-shadow: 0 4px 20px rgba(0,0,0,0.1);
-      margin-bottom: 30px;
+      margin-bottom: 8px;
     }
     .header h1 {
       color: #667eea;
-      font-size: 1.8rem;
+      font-size: 1.4rem;
     }
     .main-container {
       background: white;
       border-radius: 15px;
       box-shadow: 0 15px 35px rgba(0,0,0,0.2);
-      padding: 30px;
-      max-width: 1400px;
+      padding: 10px;
+      max-width: 100%;
       margin: 0 auto;
     }
     .filters-section {
-      background: #f8f9fa;
-      border-radius: 15px;
-      padding: 20px;
-      margin-bottom: 20px;
+      background: white;
+      border-radius: 8px;
+      padding: 10px;
+      margin-bottom: 4px;
       display: flex;
-      gap: 15px;
+      gap: 12px;
       align-items: center;
+      flex-wrap: wrap;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.1);
     }
     .filters-section label {
       font-weight: 600;
@@ -73,45 +75,95 @@
     }
     .stats-grid {
       display: grid;
-      grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
-      gap: 15px;
-      margin-bottom: 20px;
+      grid-template-columns: repeat(5, 1fr);
+      gap: 12px;
+      margin-bottom: 4px;
+      background: white;
+      border-radius: 8px;
+      padding: 20px;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+      width: 100%;
     }
     .stat-card {
       background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
       color: white;
-      padding: 20px;
-      border-radius: 15px;
+      padding: 24px 12px;
+      border-radius: 6px;
       text-align: center;
+      cursor: pointer;
+      flex: 1;
     }
     .stat-card h3 {
       font-size: 2rem;
-      margin-bottom: 8px;
+      margin: 0 0 4px 0;
+      font-weight: 700;
+      line-height: 1;
     }
     .stat-card p {
-      opacity: 0.9;
-      font-size: 0.85rem;
+      opacity: 0.95;
+      font-size: 1rem;
+      margin: 0;
+      line-height: 1;
+    }
     }
     .content-grid {
       display: grid;
-      grid-template-columns: 1fr 300px;
-      gap: 20px;
+      grid-template-columns: 1fr;
+      gap: 8px;
+      width: 100%;
+      margin-bottom: 20px;
     }
     .charging-map {
-      height: 500px;
-      border-radius: 15px;
+      height: 600px;
+      border-radius: 8px;
       position: relative;
       box-shadow: 0 4px 15px rgba(0,0,0,0.1);
+      width: 100%;
+      display: block;
+      overflow: hidden;
     }
     #map-container {
       width: 100%;
       height: 100%;
-      border-radius: 15px;
+      border-radius: 8px;
+      display: block;
+      position: absolute;
+      top: 0;
+      left: 0;
+      right: 0;
+      bottom: 0;
     }
     .leaflet-container {
       background: #f8f9fa;
+      height: 100%;
+      width: 100%;
+      display: block !important;
     }
-    .map-controls {
+    .map-and-activity-container {
+      display: grid;
+      grid-template-columns: 1fr 400px;
+      gap: 8px;
+      width: 100%;
+      margin-bottom: 20px;
+    }
+    .map-box-wrapper {
+      width: 100%;
+      height: 600px;
+      position: relative;
+      border-radius: 8px;
+      box-shadow: 0 4px 15px rgba(0,0,0,0.1);
+      overflow: hidden;
+    }
+    .activity-sidebar {
+      background: rgba(255, 255, 255, 0.95);
+      border-radius: 8px;
+      padding: 12px;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+      height: 600px;
+      overflow-y: auto;
+      width: 100%;
+    }
+        .map-controls {
       position: absolute;
       top: 10px;
       right: 10px;
@@ -129,18 +181,13 @@
       border: none;
       border-radius: 4px;
       cursor: pointer;
-      font-size: 0.9rem;
+      font-size: 1.1rem;
     }
     .map-controls button:hover {
       background: #5568d3;
     }
     .sidebar {
-      background: rgba(255, 255, 255, 0.95);
-      border-radius: 15px;
-      padding: 20px;
-      box-shadow: 0 4px 15px rgba(0,0,0,0.1);
-      max-height: 500px;
-      overflow-y: auto;
+      display: none;
     }
     .recent-activity {
       margin-top: 0;
@@ -151,9 +198,9 @@
       font-size: 1.1rem;
     }
     .activity-item {
-      padding: 12px 0;
+      padding: 16px 0;
       border-bottom: 1px solid #e0e0e0;
-      font-size: 0.9rem;
+      font-size: 1rem;
     }
     .activity-item:last-child {
       border-bottom: none;
@@ -194,7 +241,7 @@
       text-align: center;
       color: #999;
       padding: 20px 0;
-      font-size: 0.9rem;
+      font-size: 1.1rem;
     }
 
     /* Modal overlay */
@@ -340,16 +387,98 @@
       cursor: not-allowed;
     }
 
+    .filters-group {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      margin-bottom: 4px;
+      align-items: center;
+      background: white;
+      border-radius: 8px;
+      padding: 10px;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+      width: 100%;
+    }
+
+    .filter-group {
+      background: transparent;
+      border-radius: 4px;
+      padding: 0;
+      display: flex;
+      gap: 6px;
+      align-items: center;
+      flex-wrap: nowrap;
+    }
+
+    .filter-group label {
+      font-weight: 600;
+      color: #333;
+      white-space: nowrap;
+      font-size: 0.75rem;
+    }
+
+    .filter-group select {
+      padding: 3px 6px;
+      border: 1px solid #667eea;
+      border-radius: 3px;
+      font-size: 0.75rem;
+      background: white;
+      color: #333;
+    }
+
+    .filter-group input[type="number"],
+    .filter-group input[type="text"] {
+      padding: 3px 6px;
+      border: 1px solid #667eea;
+      border-radius: 3px;
+      font-size: 0.75rem;
+      width: auto;
+      min-width: 50px;
+    }
+
+    .filter-group input:focus {
+      outline: none;
+      box-shadow: 0 0 0 2px rgba(102, 126, 234, 0.1);
+    }
+
+    .filter-group button {
+      padding: 3px 8px;
+      background: #667eea;
+      color: white;
+      border: none;
+      border-radius: 3px;
+      cursor: pointer;
+      font-weight: 600;
+      font-size: 0.7rem;
+      transition: all 0.2s;
+      white-space: nowrap;
+    }
+
+    .filter-group button:hover {
+      background: #764ba2;
+    }
+
+    .reset-filters {
+      background: #999;
+    }
+
+    .reset-filters:hover {
+      background: #777;
+    }
+
     @media (max-width: 768px) {
       .content-grid {
         grid-template-columns: 1fr;
       }
       .charging-map {
-        height: 400px;
+        height: 600px;
       }
       .point-details-modal {
         width: 95%;
         padding: 20px;
+      }
+      .filters-group {
+        grid-template-columns: 1fr;
       }
     }
   </style>
@@ -360,49 +489,84 @@
   </div>
   
   <div class="main-container">
-    <!-- Filters Section -->
+    <!-- Provider Bar -->
     <div class="filters-section">
       <label for="provider-filter">Provider:</label>
       <select id="provider-filter">
         <option value="">-- Select Provider --</option>
-        <option value="red">Red Plug</option>
-        <option value="green">Green Plug</option>
-        <option value="blue">Blue Plug</option>
+        <option value="redPlug">Red Plug</option>
+        <option value="greenPlug">Green Plug</option>
+        <option value="bluePlug">Blue Plug</option>
       </select>
       <div class="loading" id="loading-indicator">Loading points...</div>
     </div>
 
-    <!-- Stats Grid -->
-    <div class="stats-grid" id="stats-grid" style="display: none;">
-      <div class="stat-card" onclick="filterByStatus('all')" style="cursor: pointer;">
-        <h3 id="total-points">-</h3>
-        <p>Total Points</p>
+
+    <div class="filters-group">
+      <!-- Address/Location Search with Radius -->
+      <div class="filter-group">
+        <label>Nearby (Address):</label>
+        <input type="text" id="address-search" placeholder="Enter address or location" style="flex: 1;">
+        <input type="number" id="search-radius" placeholder="Radius (km)" min="0.1" step="0.1" value="5" style="width: 120px;">
+        <button onclick="searchByAddress()">Search Nearby</button>
       </div>
-      <div class="stat-card" onclick="filterByStatus('available')" style="cursor: pointer;">
-        <h3 id="available-points">-</h3>
-        <p>Available</p>
+
+    <div class="filters-group">
+<!-- Connector Type Filter -->
+      <div class="filter-group">
+        <label for="connector-filter">Connector:</label>
+        <select id="connector-filter">
+          <option value="">All</option>
+          <option value="Type 2">Type 2</option>
+          <option value="Type 3">Type 3</option>
+          <option value="CHAdeMO">CHAdeMO</option>
+          <option value="CCS2">CCS2</option>
+        </select>
       </div>
-      <div class="stat-card" onclick="filterByStatus('reserved')" style="cursor: pointer;">
-        <h3 id="reserved-points">-</h3>
-        <p>Reserved</p>
+
+      <!-- Power Range Filter -->
+      <div class="filter-group">
+        <label>Power (kW):</label>
+        <input type="number" id="power-min" placeholder="Min" min="0" step="1">
+        <span>-</span>
+        <input type="number" id="power-max" placeholder="Max" min="0" step="1">
       </div>
-      <div class="stat-card" onclick="filterByStatus('offline')" style="cursor: pointer;">
-        <h3 id="offline-points">-</h3>
-        <p>Offline</p>
+
+      <!-- Price Range Filter -->
+      <div class="filter-group">
+        <label>Price (€/kWh):</label>
+        <input type="number" id="price-min" placeholder="Min" min="0" step="0.01">
+        <span>-</span>
+        <input type="number" id="price-max" placeholder="Max" min="0" step="0.01">
+      </div>
+
+      <!-- Filter Buttons -->
+      <div class="filter-group">
+        <button onclick="applyFilters()">Apply Filters</button>
+        <button class="reset-filters" onclick="resetFilters()">Reset All</button>
       </div>
     </div>
-    
-    <!-- Map and Sidebar Grid -->
-    <div class="content-grid">
-      <div class="charging-map">
-        <div id="map-container"></div>
+
+    <!-- Stats Bar -->
+    <div class="stats-grid" id="stats-grid" style="display: grid;">
+      <div class="stat-card" onclick="filterByStatus('all')"><h3 id="total-points">-</h3><p>Total</p></div>
+      <div class="stat-card" onclick="filterByStatus('available')"><h3 id="available-points">-</h3><p>Avail</p></div>
+      <div class="stat-card" onclick="filterByStatus('reserved')"><h3 id="reserved-points">-</h3><p>Res</p></div>
+      <div class="stat-card" onclick="filterByStatus('offline')"><h3 id="offline-points">-</h3><p>Off</p></div>
+      <div class="stat-card" onclick="filterByStatus('charging')"><h3 id="charging-points">-</h3><p>Chrg</p></div>
+    </div>
+
+    <!-- Map and Activity Container -->
+    <div class="map-and-activity-container">
+      <div class="map-box-wrapper">
+        <div id="map-container" style="width: 100%; height: 100%; position: absolute; top: 0; left: 0;"></div>
         <div class="map-controls">
           <button onclick="clearMarkers()">Clear All</button>
         </div>
       </div>
       
-      <!-- Sidebar with Activity -->
-      <div class="sidebar">
+      <!-- Activity Sidebar -->
+      <div class="activity-sidebar">
         <div class="recent-activity">
           <h4>Activity</h4>
           <div id="activity-list">
@@ -454,10 +618,13 @@
   
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
   <script>
-    // Color mapping for different providers
+    // Color mapping for different providers (by provider_name)
     const providerColors = {
+      redPlug: '#FF4444',
       red: '#FF4444',
+      greenPlug: '#44AA44',
       green: '#44AA44',
+      bluePlug: '#4444FF',
       blue: '#4444FF'
     };
 
@@ -528,16 +695,34 @@
     
     // Add a marker to the map with click handler
     function addMarker(lat, lng, pointData, provider) {
-      const color = provider ? providerColors[provider] : '#4444FF';
+      // Get provider color from pointData.provider_name or fallback to provider param
+      const providerKey = pointData.provider_name || provider;
+      const color = providerColors[providerKey] || '#4444FF';
       const icon = createIconWithRing(color, pointData.status);
       
       const marker = L.marker([lat, lng], { icon }).addTo(map);
       
+      // Store point data on marker for access
+      marker.pointData = pointData;
+      marker.providerKey = providerKey;
+      
       // Add click handler to open details modal
-      marker.on('click', function() {
-        showPointDetails(pointData, provider);
-        addActivity('clicked', `${pointData.location_name || 'Unknown'} (${provider})`);
-      });
+      marker.on('click', (function(pd, pk) {
+        return function() {
+          console.log('=== MARKER CLICKED ===');
+          console.log('Location:', pd.location_name || pd.location || pd.name || 'Unknown');
+          console.log('Provider:', pk);
+          console.log('Status:', pd.status);
+          console.log('Full data:', pd);
+          try {
+            showPointDetails(pd, pk);
+            addActivity('clicked', `${pd.location_name || pd.location || pd.name || 'Unknown'} (${pk})`);
+            console.log('=== CLICK HANDLED SUCCESSFULLY ===');
+          } catch(e) {
+            console.error('=== ERROR IN MARKER CLICK ===', e);
+          }
+        };
+      })(pointData, providerKey));
       
       markers.push(marker);
       return marker;
@@ -551,19 +736,35 @@
 
     // Show point details in modal
     function showPointDetails(pointData, provider) {
-      currentPointData = { ...pointData, provider };
-      
-      document.getElementById('point-title').textContent = pointData.location_name || 'Charging Station';
+      console.log('showPointDetails called for:', pointData.location_name, 'provider:', provider);
+      console.log('pointData:', pointData);
+      try {
+        currentPointData = { ...pointData, provider };
+        
+        const titleEl = document.getElementById('point-title');
+        if (!titleEl) {
+          console.error('ERROR: point-title element not found!');
+          return;
+        }
+        titleEl.textContent = pointData.location_name || 'Charging Station';
       
       const statusClass = `status-${String(pointData.status || '').toLowerCase()}`;
       const statusBadge = document.getElementById('point-status');
       statusBadge.textContent = pointData.status || 'Unknown';
       statusBadge.className = `status-badge ${statusClass}`;
       
-      document.getElementById('point-address').textContent = pointData.address || '-';
-      document.getElementById('point-capacity').textContent = pointData.capacity ? `${pointData.capacity} kW` : '-';
-      document.getElementById('point-connector').textContent = pointData.connector || '-';
-      document.getElementById('point-price').textContent = pointData.price ? `€${pointData.price.toFixed(2)}` : '-';
+      console.log('All point fields:', Object.keys(pointData).sort());
+      console.log('Address field:', pointData.address);
+      console.log('Location_name field:', pointData.location_name);
+      console.log('Capacity_kw field:', pointData.capacity_kw);
+      console.log('Capacity field:', pointData.capacity);
+      console.log('Connector field:', pointData.connector);
+      console.log('ConnectorType field:', pointData.connectorType);
+      console.log('Connector_type field:', pointData.connector_type);
+      document.getElementById('point-address').textContent = pointData.address || pointData.location_name || '-';
+      document.getElementById('point-capacity').textContent = (pointData.capacity_kw !== undefined && pointData.capacity_kw !== null) || (pointData.capacity !== undefined && pointData.capacity !== null) ? `${pointData.capacity_kw || pointData.capacity} kW` : '-';
+      document.getElementById('point-connector').textContent = pointData.connector || pointData.connectorType || pointData.connector_type || 'Not specified';
+      document.getElementById('point-price').textContent = (pointData.kwh_price !== undefined && pointData.kwh_price !== null) || (pointData.price !== undefined && pointData.price !== null) ? `€${(Number(pointData.kwh_price || pointData.price)).toFixed(2)}` : '-';
       
       // Enable/disable reserve button based on status
       const reserveBtn = document.getElementById('reserve-button');
@@ -571,7 +772,16 @@
       reserveBtn.disabled = !isAvailable;
       reserveBtn.textContent = isAvailable ? 'Reserve Now' : 'Reserve (Unavailable)';
       
-      document.getElementById('point-modal').classList.add('active');
+      const modalEl = document.getElementById('point-modal');
+      if (!modalEl) {
+        console.error('ERROR: point-modal element not found!');
+        return;
+      }
+      modalEl.classList.add('active');
+      console.log('Modal should now be visible');
+      } catch(err) {
+        console.error('ERROR in showPointDetails:', err.message, err.stack);
+      }
     }
 
     // Close point details modal
@@ -637,15 +847,17 @@
       let available = 0;
       let reserved = 0;
       let offline = 0;
+      let charging = 0;
 
       points.forEach(point => {
         const status = String(point.status || '').toLowerCase();
         if (status === 'available') available++;
         else if (status === 'reserved' || status === 'held') reserved++;
         else if (status === 'offline' || status === 'malfunction') offline++;
+        else if (status === 'charging') charging++;
       });
 
-      return { total, available, reserved, offline };
+      return { total, available, reserved, offline, charging };
     }
 
     // Update stats display
@@ -654,6 +866,7 @@
       document.getElementById('available-points').textContent = stats.available;
       document.getElementById('reserved-points').textContent = stats.reserved;
       document.getElementById('offline-points').textContent = stats.offline;
+      document.getElementById('charging-points').textContent = stats.charging;
       document.getElementById('stats-grid').style.display = 'grid';
     }
 
@@ -677,35 +890,50 @@
       currentFilter = 'all';
 
       try {
-        const response = await fetch(`/api/points/${provider}`);
+        console.log('[loadPointsByProvider] Starting fetch for provider:', provider);
+        const response = await fetch(`/api/points?provider=${provider}`);
+        console.log('[loadPointsByProvider] Response status:', response.status);
         if (!response.ok) {
-          throw new Error('Failed to fetch points');
+          throw new Error('Failed to fetch points: ' + response.status);
         }
 
         const result = await response.json();
+        console.log('[loadPointsByProvider] Response data:', result);
         clearMarkers();
 
-        // Extract points from response
+        // Extract points from response (central API returns { count: number, points: [...] })
         let points = [];
-        if (result.data && Array.isArray(result.data)) {
+        if (result.points && Array.isArray(result.points)) {
+          console.log('[loadPointsByProvider] Using result.points');
+          points = result.points;
+        } else if (result.data && Array.isArray(result.data)) {
+          console.log('[loadPointsByProvider] Using result.data');
           points = result.data;
         } else if (Array.isArray(result)) {
+          console.log('[loadPointsByProvider] Using result as array');
           points = result;
         }
 
         // Store all points for filtering
         allPoints = points;
 
-        console.log(`Loaded ${points.length} points for provider ${provider}`, points);
+        console.log(`[loadPointsByProvider] Loaded ${points.length} points for provider ${provider}`, points);
 
         // Calculate and display statistics
         const stats = calculateStats(points);
         updateStatsDisplay(stats);
 
         // Add markers for each point
+        console.log('[loadPointsByProvider] Creating markers for', points.length, 'points');
         points.forEach((point, index) => {
+          console.log('[loadPointsByProvider] Processing point', index, ':', point.location_name, 'lat:', point.lat, 'lon:', point.lon);
           if (point.lat && point.lon) {
-            addMarker(point.lat, point.lon, point, provider);
+            // Use provider_name from point data, fallback to provider param
+            const providerKey = point.provider_name || provider;
+            console.log('[loadPointsByProvider] Adding marker for', point.location_name, 'with provider:', providerKey);
+            addMarker(point.lat, point.lon, point, providerKey);
+          } else {
+            console.warn('[loadPointsByProvider] Skipping point - missing lat/lon:', point);
           }
         });
 
@@ -727,12 +955,15 @@
     function filterByStatus(status) {
       currentFilter = status;
       clearMarkers();
+      console.log('filterByStatus called with:', status, 'allPoints:', allPoints.length);
       
       if (status === 'all') {
-        // Show all points
+        // Show all points with proper provider coloring
         allPoints.forEach((point) => {
           if (point.lat && point.lon) {
-            addMarker(point.lat, point.lon, point, currentProvider);
+            const providerKey = point.provider_name || currentProvider;
+            console.log('Adding marker for all:', point.location_name, 'provider:', providerKey);
+            addMarker(point.lat, point.lon, point, providerKey);
           }
         });
       } else {
@@ -745,13 +976,16 @@
             return pointStatus === 'reserved' || pointStatus === 'held';
           } else if (status === 'offline') {
             return pointStatus === 'offline' || pointStatus === 'malfunction';
+          } else if (status === 'charging') {
+            return pointStatus === 'charging';
           }
           return false;
         });
         
         filteredPoints.forEach((point) => {
           if (point.lat && point.lon) {
-            addMarker(point.lat, point.lon, point, currentProvider);
+            const providerKey = point.provider_name || currentProvider;
+            addMarker(point.lat, point.lon, point, providerKey);
           }
         });
       }
@@ -763,13 +997,195 @@
       }
     }
 
-        // Initialize map when DOM is loaded
+        // Search for charging points near an address
+    async function searchByAddress() {
+      const address = document.getElementById('address-search').value.trim();
+      const radius = document.getElementById('search-radius').value || 5;
+
+      if (!address) {
+        alert('Please enter an address or location');
+        return;
+      }
+
+      try {
+        // Use Nominatim (OpenStreetMap) geocoding to get coordinates
+        const response = await fetch(
+          `https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(address)}`
+        );
+        
+        if (!response.ok) {
+          throw new Error('Address search failed');
+        }
+
+        const results = await response.json();
+        if (!results || results.length === 0) {
+          alert('Address not found. Please try a different search term.');
+          return;
+        }
+
+        const result = results[0];
+        const lat = parseFloat(result.lat);
+        const lon = parseFloat(result.lon);
+
+        console.log(`Found address: ${result.display_name} at ${lat}, ${lon}`);
+
+        // Filter points within radius
+        clearMarkers();
+        const radiusKm = Number(radius);
+        const filteredPoints = allPoints.filter(point => {
+          if (!point.lat || !point.lon) return false;
+          
+          // Calculate distance using Haversine formula
+          const distance = getDistance(lat, lon, point.lat, point.lon);
+          return distance <= radiusKm;
+        });
+
+        console.log(`Found ${filteredPoints.length} points within ${radiusKm}km`);
+
+        if (filteredPoints.length === 0) {
+          alert(`No charging points found within ${radiusKm}km of "${address}"`);
+          return;
+        }
+
+        // Add filtered markers
+        filteredPoints.forEach((point) => {
+          if (point.lat && point.lon) {
+            const providerKey = point.provider_name || currentProvider;
+            addMarker(point.lat, point.lon, point, providerKey);
+          }
+        });
+
+        // Center map on search location and fit bounds
+        map.setView([lat, lon], 13);
+        if (markers.length > 0) {
+          const group = new L.featureGroup(markers);
+          map.fitBounds(group.getBounds().pad(0.1));
+        }
+
+        addActivity('searched', `Found ${filteredPoints.length} points near ${address} (${radiusKm}km)`);
+      } catch (error) {
+        console.error('Error searching address:', error);
+        alert('Error searching for address: ' + error.message);
+      }
+    }
+
+    // Calculate distance between two coordinates (Haversine formula)
+    function getDistance(lat1, lon1, lat2, lon2) {
+      const R = 6371; // Earth's radius in km
+      const dLat = (lat2 - lat1) * Math.PI / 180;
+      const dLon = (lon2 - lon1) * Math.PI / 180;
+      const a = 
+        Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+        Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) *
+        Math.sin(dLon / 2) * Math.sin(dLon / 2);
+      const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+      return R * c;
+    }
+
+    // Apply advanced filters
+    function applyFilters() {
+      const connector = document.getElementById('connector-filter').value;
+      const powerMin = document.getElementById('power-min').value;
+      const powerMax = document.getElementById('power-max').value;
+      const priceMin = document.getElementById('price-min').value;
+      const priceMax = document.getElementById('price-max').value;
+
+      clearMarkers();
+      let filteredPoints = [...allPoints];
+
+// Filter by connector type
+      if (connector) {
+        filteredPoints = filteredPoints.filter(point => {
+          const pointConnector = String(point.connector || '').toLowerCase();
+          return pointConnector === connector.toLowerCase();
+        });
+      }
+
+      // Filter by power range
+      if (powerMin || powerMax) {
+        filteredPoints = filteredPoints.filter(point => {
+          const capacity = point.capacity_kw ? Number(point.capacity_kw) : null;
+          if (capacity === null) return false;
+          if (powerMin && capacity < Number(powerMin)) return false;
+          if (powerMax && capacity > Number(powerMax)) return false;
+          return true;
+        });
+      }
+
+      // Filter by price range
+      if (priceMin || priceMax) {
+        filteredPoints = filteredPoints.filter(point => {
+          const price = point.kwh_price ? Number(point.kwh_price) : null;
+          if (price === null) return true; // Include points with no price
+          if (priceMin && price < Number(priceMin)) return false;
+          if (priceMax && price > Number(priceMax)) return false;
+          return true;
+        });
+      }
+
+      // Add filtered markers
+      filteredPoints.forEach((point) => {
+        if (point.lat && point.lon) {
+          const providerKey = point.provider_name || currentProvider;
+          addMarker(point.lat, point.lon, point, providerKey);
+        }
+      });
+
+      // Fit map to markers if available
+      if (markers.length > 0) {
+        const group = new L.featureGroup(markers);
+        map.fitBounds(group.getBounds().pad(0.1));
+      } else {
+        alert('No points match the selected filters');
+      }
+
+      console.log(`Applied filters: connector=${connector}, power=${powerMin}-${powerMax}, price=${priceMin}-${priceMax}. Found ${filteredPoints.length} points`);
+    }
+
+    // Reset all filters
+    function resetFilters() {
+document.getElementById('connector-filter').value = '';
+      document.getElementById('power-min').value = '';
+      document.getElementById('power-max').value = '';
+      document.getElementById('price-min').value = '';
+      document.getElementById('price-max').value = '';
+      
+      // Reload current provider
+      const provider = document.getElementById('provider-filter').value;
+      if (provider) {
+        loadPointsByProvider(provider);
+      } else {
+        clearMarkers();
+      }
+    }
+
+    // Initialize map when DOM is loaded
     document.addEventListener('DOMContentLoaded', function() {
       initMap();
+      
+      // Initialize stats with 0 values
+      updateStatsDisplay({ 
+        total: 0, 
+        available: 0, 
+        reserved: 0, 
+        offline: 0, 
+        charging: 0 
+      });
 
       // Set up provider filter listener
       document.getElementById('provider-filter').addEventListener('change', function(e) {
         loadPointsByProvider(e.target.value);
+        resetFilters(); // Reset other filters when provider changes
+      });
+
+      // Set up enter key for filter inputs
+      const filterInputs = ['power-min', 'power-max', 'price-min', 'price-max'];
+      filterInputs.forEach(id => {
+        document.getElementById(id).addEventListener('keypress', function(e) {
+          if (e.key === 'Enter') {
+            applyFilters();
+          }
+        });
       });
     });
   </script>

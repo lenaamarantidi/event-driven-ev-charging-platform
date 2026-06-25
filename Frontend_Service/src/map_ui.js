@@ -7,21 +7,28 @@ const axios = require('axios');
 const path = require('path');
 const { normalizePoint, normalizeReservationEndTime } = require('./plugs_api');
 
-// Dynamically import PLUGAPI_POINTS from Points Service index.js
+// Dynamically import endpoints from Points Service index.js
 let PLUGAPI_POINTS;
+let API_POINTS;
 try {
   const pointsServicePath = path.join(__dirname, '../../Points_Service/src/index.js');
   const pointsServiceModule = require(pointsServicePath);
   PLUGAPI_POINTS = pointsServiceModule.PLUGAPI_POINTS;
+  API_POINTS = pointsServiceModule.API_POINTS;
   
   if (!PLUGAPI_POINTS) {
     throw new Error('PLUGAPI_POINTS not exported from Points Service');
   }
+  if (!API_POINTS) {
+    throw new Error('API_POINTS not exported from Points Service');
+  }
   
   console.log('[map_ui] Successfully imported PLUGAPI_POINTS from Points Service:', PLUGAPI_POINTS);
+  console.log('[map_ui] Successfully imported API_POINTS from Points Service:', API_POINTS);
 } catch (err) {
-  console.warn('[map_ui] Could not import PLUGAPI_POINTS from Points Service, using default:', err.message);
+  console.warn('[map_ui] Could not import endpoints from Points Service, using defaults:', err.message);
   PLUGAPI_POINTS = '/plugApi/points';
+  API_POINTS = '/api/points';
 }
 
 // Map provider names/colors to environment variables (all keys lowercase for case-insensitive lookup)
@@ -187,10 +194,151 @@ async function getAllPoints(options = {}) {
   }
 }
 
+/**
+ * Fetch all charging points from central Points Service
+ * 
+ * @param {Object} options - Optional configuration
+ * @param {string} options.protocol - HTTP protocol (default: 'http')
+ * @param {string} options.host - Docker internal host (default: 'host.docker.internal')
+ * @param {number} options.timeout - Request timeout in ms (default: 10000)
+ * @param {Object} options.filters - Query filters for points (provider, status, etc.)
+ * @returns {Promise<Array>} Array of all charging points from central service
+ * @throws {Error} If POINTS_CENTRAL_PORT not configured or request fails
+ * 
+ * @example
+ * // Fetch all points from central
+ * const allPoints = await getAllPointsFromCentral();
+ * console.log(allPoints.count, allPoints.points);
+ * 
+ * @example
+ * // With filters
+ * const filteredPoints = await getAllPointsFromCentral({
+ *   filters: { provider: 'redPlug', status: 'available' }
+ * });
+ * 
+ * @example
+ * // With custom timeout
+ * const pointsWithTimeout = await getAllPointsFromCentral({
+ *   timeout: 5000
+ * });
+ */
+async function getAllPointsFromCentral(options = {}) {
+  try {
+    // Get the central service port from environment
+    const centralPort = process.env.POINTS_CENTRAL_PORT;
+    
+    if (!centralPort) {
+      throw new Error(
+        'Environment variable POINTS_CENTRAL_PORT is not set'
+      );
+    }
+
+    // Extract options with defaults
+    const protocol = options.protocol || 'http';
+    const host = options.host || 'host.docker.internal';
+    const timeout = options.timeout || 10000;
+    const filters = options.filters || {};
+
+    // Build the URL using API_POINTS endpoint
+    let url = `${protocol}://${host}:${centralPort}${API_POINTS}`;
+
+    // Append query parameters if filters provided
+    const queryParams = new URLSearchParams();
+    if (filters.provider) queryParams.append('provider', filters.provider);
+    if (filters.status) queryParams.append('status', filters.status);
+    if (filters.avail) queryParams.append('avail', filters.avail);
+    if (filters.connectorType) queryParams.append('connectorType', filters.connectorType);
+    if (filters.lat && filters.lon && filters.radius) {
+      queryParams.append('lat', filters.lat);
+      queryParams.append('lon', filters.lon);
+      queryParams.append('radius', filters.radius);
+    }
+    if (filters.limit) queryParams.append('limit', filters.limit);
+    if (filters.costMin !== undefined) queryParams.append('costMin', filters.costMin);
+    if (filters.costMax !== undefined) queryParams.append('costMax', filters.costMax);
+    if (filters.powerMin !== undefined) queryParams.append('powerMin', filters.powerMin);
+    if (filters.powerMax !== undefined) queryParams.append('powerMax', filters.powerMax);
+    if (filters.type) queryParams.append('type', filters.type);
+
+    if (queryParams.toString()) {
+      url += '?' + queryParams.toString();
+    }
+
+    console.log(`[getAllPointsFromCentral] Fetching from ${url}`);
+
+    // Make the request
+    const response = await axios.get(url, { timeout });
+
+    if (!response.data) {
+      throw new Error(`Empty response from central service`);
+    }
+
+    console.log(`[getAllPointsFromCentral] Successfully fetched ${response.data.count || 0} points from central service`);
+
+    return response.data;
+
+  } catch (err) {
+    const errorMessage = err.response?.data?.error || err.message;
+    console.error('[getAllPointsFromCentral] Error fetching from central service:', errorMessage);
+    throw err;
+  }
+}
+
+/**
+ * Fetch a specific point from central Points Service
+ * 
+ * @param {string|number} pointId - The point ID to fetch
+ * @param {Object} options - Optional configuration
+ * @param {string} options.protocol - HTTP protocol (default: 'http')
+ * @param {string} options.host - Docker internal host (default: 'host.docker.internal')
+ * @param {number} options.timeout - Request timeout in ms (default: 10000)
+ * @returns {Promise<Object>} Point details from central service
+ * @throws {Error} If point not found or request fails
+ * 
+ * @example
+ * const point = await getPointFromCentral('3249146');
+ * console.log(point.status, point.provider_name);
+ */
+async function getPointFromCentral(pointId, options = {}) {
+  try {
+    const centralPort = process.env.POINTS_CENTRAL_PORT;
+    
+    if (!centralPort) {
+      throw new Error('Environment variable POINTS_CENTRAL_PORT is not set');
+    }
+
+    const protocol = options.protocol || 'http';
+    const host = options.host || 'host.docker.internal';
+    const timeout = options.timeout || 10000;
+
+    const url = `${protocol}://${host}:${centralPort}${API_POINTS}/${pointId}`;
+
+    console.log(`[getPointFromCentral] Fetching point ${pointId} from ${url}`);
+
+    const response = await axios.get(url, { timeout });
+
+    if (!response.data) {
+      throw new Error(`Point ${pointId} not found in central service`);
+    }
+
+    console.log(`[getPointFromCentral] Successfully fetched point ${pointId}`);
+
+    return response.data;
+
+  } catch (err) {
+    const errorMessage = err.response?.data?.error || err.message;
+    console.error(`[getPointFromCentral] Error fetching point ${pointId}:`, errorMessage);
+    throw err;
+  }
+}
+
 module.exports = {
   getPointsByProvider,
   getAllPoints,
+  getAllPointsFromCentral,
+  getPointFromCentral,
   PLUGAPI_POINTS,
+  API_POINTS,
   PROVIDER_PORT_MAP,
   normalizePoint,
   normalizeReservationEndTime
