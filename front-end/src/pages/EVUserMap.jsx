@@ -306,13 +306,10 @@ const EVUserMap = ({ setToken }) => {
           {/* Mobile Info Panel */}
           {isMobile && infoPanelOpen && selectedCharger && (
             <div className="position-fixed bottom-0 start-0 w-100" style={{ backgroundColor: 'white', maxHeight: '70vh', borderRadius: '20px 20px 0 0', zIndex: 1001, boxShadow: '0 -2px 10px rgba(0,0,0,0.1)', overflowY: 'auto' }}>
-              <div className="p-2">
-                <button className="btn btn-close" onClick={() => setInfoPanelOpen(false)}></button>
-              </div>
               <InfoPanel
                 charger={selectedCharger}
                 filters={filters}
-                onClose={() => setInfoPanelOpen(false)}
+                onClose={() => { setInfoPanelOpen(false); setSelectedCharger(null); }}
               />
             </div>
           )}
