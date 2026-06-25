@@ -219,12 +219,21 @@ const InfoPanel = ({ charger, filters, onClose }) => {
 
   return (
     <div>
-                <h3 className="mb-3">{locationName}</h3>
-        
-        <div className="card p-3 mb-3">
-                        <p className="mb-1"><strong>Address:</strong> {locationAddress}</p>
-                        <p className="mb-1"><strong>Distance:</strong> {Number(distanceKm).toFixed(2)} km</p>
-        </div>
+      <div className="d-flex justify-content-between align-items-start mb-3">
+        <h3 className="mb-0">{locationName}</h3>
+        {onClose && (
+          <button
+            type="button"
+            className="btn-close btn-close-white"
+            aria-label="Close"
+            onClick={onClose}
+          />
+        )}
+      </div>
+      <div className="card p-3 mb-3">
+        <p className="mb-1"><strong>Address:</strong> {locationAddress}</p>
+        <p className="mb-1"><strong>Distance:</strong> {Number(distanceKm).toFixed(2)} km</p>
+      </div>
 
                 <div className="card p-3 mb-3">
                         <p className="mb-1"><strong>Connector:</strong> {outletConnectorType}</p>

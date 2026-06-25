@@ -1,22 +1,25 @@
 #!/usr/bin/env bash
 
-# Central local deployment for saasPlug.
+# Central deployment for saasPlug - Server Edition (Team 11).
 #
 # What it does:
-#   1. Starts Docker services from docker-compose.yml.
+#   1. Starts Docker services from docker-compose.yml (backends only).
 #   2. Resets persisted DB/RabbitMQ volumes by default.
 #   3. Seeds the three built-in providers through the existing provider seed script.
 #   4. Creates the reserved operator user in Auth DB.
 #   5. Loads mock Analytics and Billing data from existing SQL files.
 #   6. Triggers Points Service repopulation from the three provider adapters.
-#   7. Starts the React frontend via front-end/run_frontend.sh.
+#   7. Starts the React frontend (front-end/) on port 3311.
+#
+# Deployment location: 147.102.112.123:3311
+# Backend services: 147.102.112.123:55xx (55xx range for team 11)
 #
 # Usage:
 #   ./deploy.sh
 #
 # Optional environment:
 #   RESET_DATA=0 ./deploy.sh       # keep existing Docker volumes
-#   FRONTEND=0 ./deploy.sh         # do not start Vite frontend
+#   FRONTEND=0 ./deploy.sh         # do not start React frontend
 #   OPERATOR_PASSWORD=... ./deploy.sh
 
 set -euo pipefail
@@ -131,7 +134,7 @@ seed_providers() {
 
 repopulate_points() {
   log "Loading charging points from provider adapters into central Points DB"
-  curl -fsS -X POST "http://localhost:3001/db/repopulate" \
+  curl -fsS -X POST "http://localhost:5512/db/repopulate" \
     -H "Content-Type: application/json" \
     -d '{}' \
     | node -e "let s=''; process.stdin.on('data', d => s += d); process.stdin.on('end', () => { try { console.log(JSON.stringify(JSON.parse(s), null, 2)); } catch (_) { console.log(s); } });"
@@ -166,13 +169,13 @@ main() {
   wait_for_container_health saasplug-mariadb-billing
   wait_for_container_health saasplug-central
 
-  wait_for_http "http://localhost:3100/auth/health"
-  wait_for_http "http://localhost:3101/health"
-  wait_for_http "http://localhost:3106/health"
-  wait_for_http "http://localhost:3103/health"
-  wait_for_http "http://localhost:3111/health"
-  wait_for_http "http://localhost:3112/health"
-  wait_for_http "http://localhost:3113/health"
+  wait_for_http "http://localhost:5517/auth/health"
+  wait_for_http "http://localhost:5516/health"
+  wait_for_http "http://localhost:5518/health"
+  wait_for_http "http://localhost:5514/health"
+  wait_for_http "http://localhost:5520/health"
+  wait_for_http "http://localhost:5521/health"
+  wait_for_http "http://localhost:5522/health"
 
   seed_providers
   seed_operator_user
@@ -184,18 +187,20 @@ main() {
 
   log "Deployment data is ready"
   echo "  Backend examples:"
-  echo "    Auth:      http://localhost:3100/auth/health"
-  echo "    Points:    http://localhost:3001/api/points"
-  echo "    Analytics: http://localhost:3106/health"
-  echo "    Billing:   http://localhost:3103/health"
+  echo "    Auth:      http://localhost:5517/auth/health"
+  echo "    Points:    http://localhost:5512/api/points"
+  echo "    Analytics: http://localhost:5518/health"
+  echo "    Billing:   http://localhost:5514/health"
   echo "  Operator credentials:"
   echo "    username: $OPERATOR_USERNAME"
   echo "    email:    $OPERATOR_EMAIL"
   echo "    password: $OPERATOR_PASSWORD"
 
   if [ "$FRONTEND" = "1" ]; then
-    log "Starting React frontend"
-    exec "$ROOT_DIR/front-end/run_frontend.sh"
+    log "Starting React frontend on port 3311"
+    cd "$ROOT_DIR/front-end"
+    npm install >/dev/null 2>&1
+    exec npm run dev -- --host 0.0.0.0
   fi
 
   echo "Frontend skipped. Run: cd front-end && npm run dev"

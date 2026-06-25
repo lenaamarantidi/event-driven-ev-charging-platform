@@ -624,23 +624,6 @@ services:
       - saasplug-network
     restart: unless-stopped
 
-  frontend-service:
-    build:
-      context: ./Frontend_Service
-    container_name: saasplug-frontend
-    ports:
-      - "${FRONTEND_SERVICE_PORT}:${FRONTEND_SERVICE_PORT}"
-    env_file:
-      - .env
-    environment:
-      PORT: ${FRONTEND_SERVICE_PORT}
-      NODE_ENV: production
-    depends_on:
-      - api-gateway
-    networks:
-      - saasplug-network
-    restart: unless-stopped
-
 networks:
   saasplug-network:
     driver: bridge
