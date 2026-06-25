@@ -81,6 +81,15 @@ function normalizeProviderName(value) {
   return null;
 }
 
+function getProviderId(providerName) {
+  const providerIds = {
+    redPlug: 1,
+    greenPlug: 2,
+    bluePlug: 3
+  };
+  return providerIds[providerName] || null;
+}
+
 async function handleReservationRequest({ pointId, minutes, userId, providerNameFromBody }) {
   const reservationId = uuidv4();
   const duration = Number(minutes ?? 60);
@@ -138,7 +147,7 @@ async function handleReservationRequest({ pointId, minutes, userId, providerName
 
   await logReservation({
     reservationId,
-    providerId: providerName === 'greenPlug' ? 2 : providerName === 'bluePlug' ? 3 : 1,
+    providerId: getProviderId(providerName),
     providerName,
     pointId,
     duration,
@@ -154,7 +163,7 @@ async function handleReservationRequest({ pointId, minutes, userId, providerName
   if (successful) {
     await publishReservationEvent({
       reservationId,
-      providerId: providerName === 'greenPlug' ? 2 : providerName === 'bluePlug' ? 3 : 1,
+      providerId: getProviderId(providerName),
       providerName,
       pointId,
       duration,
@@ -168,7 +177,7 @@ async function handleReservationRequest({ pointId, minutes, userId, providerName
   // Publish reservation_completed event to Analytics Service for both success and failure cases
   await publishReservationCompleted({
     reservationId,
-    providerId: providerName === 'greenPlug' ? 2 : providerName === 'bluePlug' ? 3 : 1,
+    providerId: getProviderId(providerName),
     providerName,
     userId,
     pointId,
@@ -393,4 +402,3 @@ process.on('SIGINT', async () => {
   if (pool) await pool.end();
   process.exit(0);
 });
-

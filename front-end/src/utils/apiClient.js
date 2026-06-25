@@ -43,9 +43,12 @@ export const providerAPI = {
         data: response.data
       };
     } catch (error) {
+      const details = error.response?.data?.details;
       return {
         success: false,
-        error: error.response?.data?.error || error.response?.data?.message || error.message
+        error: Array.isArray(details)
+          ? details.join(' | ')
+          : error.response?.data?.error || error.response?.data?.message || error.message
       };
     }
   },
@@ -118,19 +121,13 @@ export const providerAPI = {
  */
 export const analyticsAPI = {
   /**
-   * GET /api/analytics/provider/:providerId?period=monthly&from=DATE&to=DATE
-   * Λήψη analytics για συγκεκριμένο provider
+   * GET /api/analytics/providers/:providerId
+   * Provider KPI metrics from Analytics Service.
    */
-  getProviderAnalytics: async (providerId, options = {}) => {
+  getProviderAnalytics: async (providerId) => {
     try {
       const api = createApiInstance(SERVICES.analytics);
-      const params = new URLSearchParams({
-        period: options.period || 'monthly',
-        ...(options.from && { from: options.from }),
-        ...(options.to && { to: options.to })
-      }).toString();
-      
-      const response = await api.get(`/analytics/provider/${providerId}?${params}`, getAuthHeaders());
+      const response = await api.get(`/providers/${providerId}`, getAuthHeaders());
       return {
         success: true,
         data: response.data
@@ -145,13 +142,13 @@ export const analyticsAPI = {
   },
 
   /**
-   * GET /api/analytics/provider/:providerId/daily
-   * Λήψη ημερήσιων analytics
+   * GET /api/analytics/providers/:providerId/timeseries
+   * Provider six-month reservation and user timeseries.
    */
-  getDailyAnalytics: async (providerId) => {
+  getProviderTimeseries: async (providerId) => {
     try {
       const api = createApiInstance(SERVICES.analytics);
-      const response = await api.get(`/analytics/provider/${providerId}/daily`, getAuthHeaders());
+      const response = await api.get(`/providers/${providerId}/timeseries`, getAuthHeaders());
       return {
         success: true,
         data: response.data
@@ -160,14 +157,21 @@ export const analyticsAPI = {
       return {
         success: false,
         error: error.response?.data?.message || error.message,
-        data: []
+        data: {}
       };
     }
   },
 
   /**
+   * Legacy alias kept for older screens.
+   */
+  getDailyAnalytics: async (providerId) => {
+    return analyticsAPI.getProviderTimeseries(providerId);
+  },
+
+  /**
    * UC08: Export provider logs
-   * GET /api/analytics/provider/:providerId/export
+   * GET /api/analytics/providers/:providerId/export
    * Downloads activity logs as CSV or JSON
    */
   exportLogs: async (providerId, format = 'csv', startDate, endDate) => {
@@ -180,7 +184,7 @@ export const analyticsAPI = {
       }).toString();
       
       const response = await api.get(
-        `/analytics/provider/${providerId}/export?${params}`,
+        `/providers/${providerId}/export?${params}`,
         {
           ...getAuthHeaders(),
           responseType: format === 'csv' ? 'blob' : 'json'
@@ -207,7 +211,7 @@ export const analyticsAPI = {
     try {
       const api = createApiInstance(SERVICES.analytics);
       const response = await api.post(
-        `/analytics/provider/${providerId}/request-invoice`,
+        `/providers/${providerId}/request-invoice`,
         {
           period,
           ...(startDate && { startDate }),
@@ -231,10 +235,70 @@ export const analyticsAPI = {
    * GET /api/analytics/global?period=monthly
    * Λήψη συνολικών analytics του συστήματος
    */
-  getGlobalAnalytics: async (period = 'monthly') => {
+  getGlobalAnalytics: async (period = 'monthly', filters = {}) => {
     try {
       const api = createApiInstance(SERVICES.analytics);
-      const response = await api.get(`/analytics/global?period=${period}`, getAuthHeaders());
+      const params = new URLSearchParams({
+        period,
+        ...(filters.providerId && filters.providerId !== 'all' && { providerId: filters.providerId }),
+        ...(filters.startDate && { startDate: filters.startDate }),
+        ...(filters.endDate && { endDate: filters.endDate })
+      }).toString();
+      const response = await api.get(`/global?${params}`, getAuthHeaders());
+      return {
+        success: true,
+        data: response.data
+      };
+    } catch (error) {
+      return {
+        success: false,
+        error: error.response?.data?.message || error.message,
+        data: {}
+      };
+    }
+  },
+
+  /**
+   * GET /api/analytics/global/timeseries
+   * Operator six-month analytics.
+   */
+  getGlobalTimeseries: async (period = '6months', filters = {}) => {
+    try {
+      const api = createApiInstance(SERVICES.analytics);
+      const params = new URLSearchParams({
+        period,
+        ...(filters.providerId && filters.providerId !== 'all' && { providerId: filters.providerId }),
+        ...(filters.startDate && { startDate: filters.startDate }),
+        ...(filters.endDate && { endDate: filters.endDate })
+      }).toString();
+      const response = await api.get(`/global/timeseries?${params}`, getAuthHeaders());
+      return {
+        success: true,
+        data: response.data
+      };
+    } catch (error) {
+      return {
+        success: false,
+        error: error.response?.data?.message || error.message,
+        data: {}
+      };
+    }
+  },
+
+  /**
+   * GET /api/analytics/global/rankings
+   * Operator provider rankings.
+   */
+  getGlobalRankings: async (period = '6months', filters = {}) => {
+    try {
+      const api = createApiInstance(SERVICES.analytics);
+      const params = new URLSearchParams({
+        period,
+        ...(filters.providerId && filters.providerId !== 'all' && { providerId: filters.providerId }),
+        ...(filters.startDate && { startDate: filters.startDate }),
+        ...(filters.endDate && { endDate: filters.endDate })
+      }).toString();
+      const response = await api.get(`/global/rankings?${params}`, getAuthHeaders());
       return {
         success: true,
         data: response.data
@@ -281,7 +345,7 @@ export const billingAPI = {
   getInvoice: async (providerId) => {
     try {
       const api = createApiInstance(SERVICES.billing);
-      const response = await api.get(`/billing/invoice/${providerId}`, getAuthHeaders());
+      const response = await api.get(`/invoice/${providerId}`, getAuthHeaders());
       return {
         success: true,
         data: response.data
@@ -301,7 +365,7 @@ export const billingAPI = {
   getInvoiceHistory: async (providerId, limit = 12) => {
     try {
       const api = createApiInstance(SERVICES.billing);
-      const response = await api.get(`/billing/invoices/${providerId}?limit=${limit}`, getAuthHeaders());
+      const response = await api.get(`/invoices/${providerId}?limit=${limit}`, getAuthHeaders());
       return {
         success: true,
         data: response.data
@@ -322,7 +386,7 @@ export const billingAPI = {
   markInvoiceAsPaid: async (providerId, invoiceId) => {
     try {
       const api = createApiInstance(SERVICES.billing);
-      const response = await api.post(`/billing/invoices/${providerId}/${invoiceId}/mark-paid`, {}, getAuthHeaders());
+      const response = await api.post(`/invoices/${providerId}/${invoiceId}/mark-paid`, {}, getAuthHeaders());
       return {
         success: true,
         data: response.data
@@ -343,7 +407,7 @@ export const billingAPI = {
     try {
       const api = createApiInstance(SERVICES.billing);
       const response = await api.post(
-        `/billing/invoices/${providerId}/${invoiceId}/pay`,
+        `/invoices/${providerId}/${invoiceId}/pay`,
         paymentData || { paymentMethod: 'bank_transfer' },
         getAuthHeaders()
       );
@@ -367,7 +431,7 @@ export const billingAPI = {
     try {
       const api = createApiInstance(SERVICES.billing);
       const response = await api.get(
-        `/billing/provider/${providerId}/payments?limit=${limit}`,
+        `/provider/${providerId}/payments?limit=${limit}`,
         getAuthHeaders()
       );
       return {
@@ -391,7 +455,7 @@ export const billingAPI = {
     try {
       const api = createApiInstance(SERVICES.billing);
       const response = await api.get(
-        `/billing/outstanding/${providerId}`,
+        `/outstanding/${providerId}`,
         getAuthHeaders()
       );
       return {
@@ -414,7 +478,7 @@ export const billingAPI = {
   getSummary: async (providerId) => {
     try {
       const api = createApiInstance(SERVICES.billing);
-      const response = await api.get(`/billing/summary/${providerId}`, getAuthHeaders());
+      const response = await api.get(`/summary/${providerId}`, getAuthHeaders());
       return {
         success: true,
         data: response.data
@@ -461,9 +525,12 @@ export const pointsAPI = {
   getAll: async (params = {}) => {
     try {
       const api = createApiInstance(SERVICES.points);
+      const cleanParams = Object.fromEntries(
+        Object.entries(params).filter(([, value]) => value !== undefined && value !== null && value !== '' && value !== 'all')
+      );
       const response = await api.get('', {
         ...getAuthHeaders(),
-        params
+        params: cleanParams
       });
       return {
         success: true,

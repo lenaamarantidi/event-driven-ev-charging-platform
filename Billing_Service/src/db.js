@@ -52,11 +52,13 @@ async function initializeDatabase() {
         provider_id INT(10) UNSIGNED NOT NULL,
         billing_period_start DATE NOT NULL,
         billing_period_end DATE NOT NULL,
+        successful_reservations_count INT(10) UNSIGNED NOT NULL DEFAULT 0,
+        monthly_fee DECIMAL(10, 2) NOT NULL DEFAULT 15.00,
+        reservation_price DECIMAL(10, 2) NOT NULL DEFAULT 0.10,
         total_amount DECIMAL(15, 2) NOT NULL,
         tax_amount DECIMAL(15, 2) DEFAULT 0.00,
         grand_total DECIMAL(15, 2) NOT NULL,
-        status VARCHAR(50) DEFAULT 'draft' COMMENT 'draft, sent, paid, overdue, cancelled',
-        event_count INT(10) DEFAULT 0 COMMENT 'Number of billable events in this invoice',
+        status VARCHAR(50) DEFAULT 'PENDING' COMMENT 'PENDING, PAID',
         issued_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
         due_date DATE NOT NULL,
         paid_at TIMESTAMP NULL,
@@ -82,7 +84,7 @@ async function initializeDatabase() {
       ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
     `);
 
-    // Create pricing_config table
+    // Create pricing_config table (legacy support)
     await connection.query(`
       CREATE TABLE IF NOT EXISTS pricing_config (
         config_id INT(10) UNSIGNED PRIMARY KEY AUTO_INCREMENT,
@@ -98,7 +100,34 @@ async function initializeDatabase() {
       ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
     `);
 
-    // Insert default pricing if not exists
+    // Create provider_pricing table for monthly billing policy per provider
+    await connection.query(`
+      CREATE TABLE IF NOT EXISTS provider_pricing (
+        provider_id INT(10) UNSIGNED PRIMARY KEY,
+        monthly_fee DECIMAL(10, 2) NOT NULL DEFAULT 15.00,
+        reservation_price DECIMAL(10, 2) NOT NULL DEFAULT 0.10,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+        INDEX idx_provider_id (provider_id)
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+    `);
+
+    // Create current_usage table for the active billing period
+    await connection.query(`
+      CREATE TABLE IF NOT EXISTS current_usage (
+        provider_id INT(10) UNSIGNED PRIMARY KEY,
+        billing_period DATE NOT NULL COMMENT 'First day of the current billing month',
+        successful_reservations INT(10) UNSIGNED NOT NULL DEFAULT 0,
+        monthly_fee DECIMAL(10, 2) NOT NULL DEFAULT 15.00,
+        reservation_price DECIMAL(10, 2) NOT NULL DEFAULT 0.10,
+        estimated_amount DECIMAL(15, 2) NOT NULL DEFAULT 0.00,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+        INDEX idx_provider_id (provider_id),
+        INDEX idx_billing_period (billing_period)
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+    `);
+
+    // Insert default pricing if not exists (legacy table)
     await connection.query(`
       INSERT IGNORE INTO pricing_config (cost_per_reservation, cost_per_charging_hour, setup_fee, active)
       VALUES (0.50, 1.00, 0.00, 1);
@@ -123,6 +152,16 @@ async function initializeDatabase() {
       ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
     `);
 
+    // Create billing_metadata table for scheduled task tracking
+    await connection.query(`
+      CREATE TABLE IF NOT EXISTS billing_metadata (
+        key_name VARCHAR(255) PRIMARY KEY,
+        value VARCHAR(500) NOT NULL,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+        INDEX idx_updated_at (updated_at)
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+    `);
 
     connection.release();
     console.log('Database schema initialized successfully');

@@ -1,0 +1,54 @@
+openapi: 3.0.3
+info:
+  title: Test Charging Provider API
+  version: 1.0.0
+servers:
+  - url: https://test-provider.example.com/api
+paths:
+  /points:
+    get:
+      summary: List charging points
+      responses:
+        "200":
+          description: Charging points returned
+  /points/{pointid}:
+    get:
+      summary: Get charging point details
+      parameters:
+        - name: pointid
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Charging point details returned
+  /reserve/{pointid}:
+    post:
+      summary: Reserve charging point
+      parameters:
+        - name: pointid
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Reservation completed
+  /reserve/{pointid}/{minutes}:
+    post:
+      summary: Reserve charging point for a specific duration
+      parameters:
+        - name: pointid
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: minutes
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: Timed reservation completed

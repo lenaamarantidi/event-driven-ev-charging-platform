@@ -272,6 +272,119 @@ label {
   color: var(--text-secondary) !important;
 }
 
+/* Provider analytics dashboard */
+.analytics-shell {
+  background: var(--bg-color);
+  height: 100vh;
+  min-height: 100vh;
+  overflow-y: auto;
+  overflow-x: hidden;
+}
+
+.analytics-subtle {
+  color: var(--text-secondary);
+  font-size: 0.9rem;
+}
+
+.analytics-panel {
+  background-color: var(--secondary-bg);
+  color: var(--text-color);
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  padding: 18px;
+}
+
+.analytics-card {
+  min-height: 132px;
+  background-color: var(--tertiary-bg);
+  border: 1px solid var(--border-color);
+  border-left-width: 5px;
+  border-radius: 8px;
+  padding: 18px;
+}
+
+.analytics-card-primary {
+  border-left-color: var(--primary-color);
+}
+
+.analytics-card-success {
+  border-left-color: var(--success-color);
+}
+
+.analytics-card-danger {
+  border-left-color: var(--error-text);
+}
+
+.analytics-card-info {
+  border-left-color: #87ceeb;
+}
+
+.analytics-card-label {
+  color: var(--text-secondary);
+  font-size: 0.85rem;
+  margin-bottom: 0.5rem;
+}
+
+.analytics-card h3 {
+  margin-bottom: 0.25rem;
+}
+
+.analytics-card span {
+  color: var(--text-secondary);
+  font-size: 0.85rem;
+}
+
+.analytics-empty {
+  min-height: 220px;
+  display: grid;
+  place-items: center;
+  color: var(--text-secondary);
+  border: 1px dashed var(--border-light);
+  border-radius: 8px;
+}
+
+.analytics-bars {
+  height: 260px;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(54px, 1fr));
+  gap: 12px;
+  align-items: end;
+}
+
+.analytics-bar-item {
+  min-width: 0;
+  height: 100%;
+  display: grid;
+  grid-template-rows: 24px 1fr 28px;
+  gap: 8px;
+  text-align: center;
+}
+
+.analytics-bar-value,
+.analytics-bar-label {
+  color: var(--text-secondary);
+  font-size: 0.78rem;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.analytics-bar-track {
+  height: 100%;
+  display: flex;
+  align-items: end;
+  background-color: var(--tertiary-bg);
+  border: 1px solid var(--border-color);
+  border-radius: 6px;
+  overflow: hidden;
+}
+
+.analytics-bar-fill {
+  width: 100%;
+  background: linear-gradient(180deg, var(--accent-color), var(--primary-color));
+  border-radius: 6px 6px 0 0;
+}
+
 /* Spacing utilities */
 .gap-3 {
   gap: 1rem !important;

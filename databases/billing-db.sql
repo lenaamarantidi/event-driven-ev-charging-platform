@@ -1,9 +1,5 @@
--- Billing_Service Database Schema
+-- Billing Service database schema and mock billing data
 -- Database: billing_db
--- Stores billable events and invoices for providers
---
--- Mock billing data targets redPlug:
--- provider_id = 1, period = January through June 2026.
 
 CREATE DATABASE IF NOT EXISTS billing_db;
 USE billing_db;
@@ -114,45 +110,8 @@ CREATE TABLE IF NOT EXISTS billing_metadata (
   INDEX idx_updated_at (updated_at)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
-INSERT INTO provider_pricing (provider_id, monthly_fee, reservation_price)
-VALUES (1, 15.00, 0.10)
-ON DUPLICATE KEY UPDATE
-  monthly_fee = VALUES(monthly_fee),
-  reservation_price = VALUES(reservation_price),
-  updated_at = CURRENT_TIMESTAMP;
-
-DELETE line_items
-FROM invoice_line_items line_items
-JOIN invoices invoice ON invoice.invoice_id = line_items.invoice_id
-WHERE invoice.provider_id = 1;
-
-DELETE FROM payment_history WHERE provider_id = 1;
-DELETE FROM invoices WHERE provider_id = 1;
-DELETE FROM current_usage WHERE provider_id = 1;
-DELETE FROM billable_events WHERE provider_id = 1;
-
-INSERT INTO billable_events (
-  provider_id,
-  reservation_id,
-  amount,
-  event_type,
-  created_at,
-  billing_month
-)
-WITH RECURSIVE seq AS (
-  SELECT 1 AS n
-  UNION ALL
-  SELECT n + 1 FROM seq WHERE n < 176
-)
-SELECT
-  1,
-  CONCAT('mock-redplug-res-', LPAD(n, 3, '0')),
-  0.10,
-  'reservation',
-  TIMESTAMP(DATE_ADD('2026-01-01', INTERVAL n DAY), MAKETIME(7 + (n % 13), (n * 5) % 60, 0)),
-  DATE_FORMAT(DATE_ADD('2026-01-01', INTERVAL n DAY), '%Y-%m-01')
-FROM seq
-WHERE n % 9 NOT IN (0, 7);
+INSERT IGNORE INTO provider_pricing (provider_id, monthly_fee, reservation_price)
+VALUES (1, 15.00, 0.10);
 
 INSERT INTO invoices (
   provider_id,
@@ -169,43 +128,12 @@ INSERT INTO invoices (
   due_date,
   paid_at
 )
-SELECT
-  1,
-  months.month_start,
-  LAST_DAY(months.month_start),
-  COUNT(events.event_id),
-  pricing.monthly_fee,
-  pricing.reservation_price,
-  ROUND(pricing.monthly_fee + COUNT(events.event_id) * pricing.reservation_price, 2),
-  0.00,
-  ROUND(pricing.monthly_fee + COUNT(events.event_id) * pricing.reservation_price, 2),
-  CASE
-    WHEN months.month_start <= '2026-04-01' THEN 'PAID'
-    ELSE 'PENDING'
-  END,
-  CASE
-    WHEN months.month_start = '2026-06-01' THEN '2026-06-25 10:00:00'
-    ELSE TIMESTAMP(DATE_ADD(LAST_DAY(months.month_start), INTERVAL 1 DAY), '10:00:00')
-  END,
-  LAST_DAY(DATE_ADD(months.month_start, INTERVAL 1 MONTH)),
-  CASE
-    WHEN months.month_start <= '2026-04-01' THEN TIMESTAMP(DATE_ADD(LAST_DAY(months.month_start), INTERVAL 3 DAY), '11:30:00')
-    ELSE NULL
-  END
-FROM (
-  SELECT DATE('2026-01-01') AS month_start
-  UNION ALL SELECT DATE('2026-02-01')
-  UNION ALL SELECT DATE('2026-03-01')
-  UNION ALL SELECT DATE('2026-04-01')
-  UNION ALL SELECT DATE('2026-05-01')
-  UNION ALL SELECT DATE('2026-06-01')
-) months
-CROSS JOIN provider_pricing pricing
-LEFT JOIN billable_events events
-  ON events.provider_id = 1
- AND events.billing_month = months.month_start
-WHERE pricing.provider_id = 1
-GROUP BY months.month_start, pricing.monthly_fee, pricing.reservation_price
+VALUES
+  (1, '2026-01-01', '2026-01-31', 28, 15.00, 0.10, 18.80, 0.00, 18.80, 'PAID', '2026-02-01 10:00:00', '2026-02-28', '2026-02-03 11:30:00'),
+  (1, '2026-02-01', '2026-02-28', 30, 15.00, 0.10, 18.00, 0.00, 18.00, 'PAID', '2026-03-01 10:00:00', '2026-03-31', '2026-03-04 09:45:00'),
+  (1, '2026-03-01', '2026-03-31', 22, 15.00, 0.10, 17.20, 0.00, 17.20, 'PENDING', '2026-04-01 10:00:00', '2026-04-30', NULL),
+  (1, '2026-04-01', '2026-04-30', 34, 15.00, 0.10, 18.40, 0.00, 18.40, 'PAID', '2026-05-01 10:00:00', '2026-05-31', '2026-05-02 12:00:00'),
+  (1, '2026-05-01', '2026-05-31', 25, 15.00, 0.10, 17.50, 0.00, 17.50, 'PENDING', '2026-06-01 10:00:00', '2026-06-30', NULL)
 ON DUPLICATE KEY UPDATE
   successful_reservations_count = VALUES(successful_reservations_count),
   monthly_fee = VALUES(monthly_fee),
@@ -219,64 +147,32 @@ ON DUPLICATE KEY UPDATE
   paid_at = VALUES(paid_at);
 
 INSERT INTO invoice_line_items (invoice_id, description, quantity, unit_price, line_total)
-SELECT invoice_id, 'Monthly subscription fee', 1, monthly_fee, monthly_fee
-FROM invoices
-WHERE provider_id = 1
-UNION ALL
-SELECT
-  invoice_id,
-  'Reservation fee',
-  successful_reservations_count,
-  reservation_price,
-  ROUND(successful_reservations_count * reservation_price, 2)
-FROM invoices
-WHERE provider_id = 1;
+VALUES
+  (1, 'Monthly subscription fee', 1, 15.00, 15.00),
+  (1, 'Reservation fee', 28, 0.10, 2.80),
+  (2, 'Monthly subscription fee', 1, 15.00, 15.00),
+  (2, 'Reservation fee', 30, 0.10, 3.00),
+  (3, 'Monthly subscription fee', 1, 15.00, 15.00),
+  (3, 'Reservation fee', 22, 0.10, 2.20),
+  (4, 'Monthly subscription fee', 1, 15.00, 15.00),
+  (4, 'Reservation fee', 34, 0.10, 3.40),
+  (5, 'Monthly subscription fee', 1, 15.00, 15.00),
+  (5, 'Reservation fee', 25, 0.10, 2.50)
+ON DUPLICATE KEY UPDATE
+  description = VALUES(description),
+  quantity = VALUES(quantity),
+  unit_price = VALUES(unit_price),
+  line_total = VALUES(line_total);
 
-INSERT IGNORE INTO payment_history (
-  invoice_id,
-  provider_id,
-  amount,
-  payment_method,
-  reference,
-  status,
-  notes,
-  paid_at
-)
-SELECT
-  invoice_id,
-  provider_id,
-  grand_total,
-  'bank_transfer',
-  CONCAT('PAY-REDPLUG-', DATE_FORMAT(billing_period_start, '%Y%m')),
-  'completed',
-  'Mock payment for redPlug monthly invoice',
-  paid_at
-FROM invoices
-WHERE provider_id = 1
-  AND status = 'PAID'
-  AND paid_at IS NOT NULL;
+INSERT IGNORE INTO payment_history (invoice_id, provider_id, amount, payment_method, reference, status, notes, paid_at)
+VALUES
+  (1, 1, 18.80, 'bank_transfer', 'PAY-202601', 'completed', 'Paid by provider', '2026-02-03 11:30:00'),
+  (2, 1, 18.00, 'bank_transfer', 'PAY-202602', 'completed', 'Paid by provider', '2026-03-04 09:45:00'),
+  (4, 1, 18.40, 'bank_transfer', 'PAY-202604', 'completed', 'Paid by provider', '2026-05-02 13:00:00');
 
-INSERT INTO current_usage (
-  provider_id,
-  billing_period,
-  successful_reservations,
-  monthly_fee,
-  reservation_price,
-  estimated_amount,
-  updated_at
-)
-SELECT
-  1,
-  '2026-06-01',
-  COUNT(*),
-  pricing.monthly_fee,
-  pricing.reservation_price,
-  ROUND(pricing.monthly_fee + COUNT(*) * pricing.reservation_price, 2),
-  '2026-06-25 12:00:00'
-FROM billable_events events
-JOIN provider_pricing pricing ON pricing.provider_id = 1
-WHERE events.provider_id = 1
-  AND events.billing_month = '2026-06-01'
+INSERT INTO current_usage (provider_id, billing_period, successful_reservations, monthly_fee, reservation_price, estimated_amount, updated_at)
+VALUES
+  (1, '2026-06-01', 18, 15.00, 0.10, 16.80, '2026-06-16 12:00:00')
 ON DUPLICATE KEY UPDATE
   successful_reservations = VALUES(successful_reservations),
   monthly_fee = VALUES(monthly_fee),

@@ -19,22 +19,36 @@ echo "  POINTS_BLUE_PORT=$POINTS_BLUE_PORT"
 
 START_PORT=3001
 MAX_PORT=4000
-
-# Find first available port
 port=$START_PORT
-while [ $port -le $MAX_PORT ]; do
-    if ! lsof -i :"$port" >/dev/null 2>&1; then
-        break
-    fi
-    port=$((port + 1))
-done
 
-if [ $port -gt $MAX_PORT ]; then
-    echo "ERROR: No available ports found in range $START_PORT-$MAX_PORT" >&2
-    exit 1
+# Prefer configured port from .env when available
+if [ -f .env ]; then
+    configured_port=$(grep -E '^FRONTEND_SERVICE_PORT=' .env | cut -d '=' -f2- || true)
+    if [ -n "$configured_port" ]; then
+        port="$configured_port"
+    fi
 fi
 
-echo "Found available port: $port"
+if [ -z "$port" ]; then
+    port=$START_PORT
+fi
+
+# Find first available port if no configured value was found
+if [ "$port" -eq "$START_PORT" ]; then
+    while [ $port -le $MAX_PORT ]; do
+        if ! lsof -i :"$port" >/dev/null 2>&1; then
+            break
+        fi
+        port=$((port + 1))
+    done
+
+    if [ $port -gt $MAX_PORT ]; then
+        echo "ERROR: No available ports found in range $START_PORT-$MAX_PORT" >&2
+        exit 1
+    fi
+fi
+
+echo "Using port: $port"
 export FRONTEND_SERVICE_PORT=$port
 
 # Always rebuild image with no cache

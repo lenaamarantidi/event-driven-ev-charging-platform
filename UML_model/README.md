@@ -1,1 +1,0 @@
-All UML diagrams

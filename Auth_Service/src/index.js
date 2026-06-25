@@ -31,6 +31,10 @@ const DB_PORT = Number(process.env.DB_PORT || 3306);
 const DB_USER = process.env.DB_USER || 'auth_user';
 const DB_PASSWORD = process.env.DB_PASSWORD || 'auth_pass';
 const DB_NAME = process.env.DB_NAME || 'auth_db';
+const OPERATOR_IDENTIFIERS = (process.env.OPERATOR_IDENTIFIERS || 'operator,admin,saas-operator,operator@charger.io,admin@charger.io')
+  .split(',')
+  .map((value) => value.trim().toLowerCase())
+  .filter(Boolean);
 
 const pool = mysql.createPool({
   host: DB_HOST,
@@ -126,6 +130,16 @@ function normalizeUser(row) {
   };
 }
 
+function isOperatorIdentifier(value) {
+  return OPERATOR_IDENTIFIERS.includes(String(value || '').trim().toLowerCase());
+}
+
+function getUserRole(user) {
+  return isOperatorIdentifier(user?.email) || isOperatorIdentifier(user?.username)
+    ? 'operator'
+    : 'ev_user';
+}
+
 function validateEmail(email) {
   return typeof email === 'string' && /\S+@\S+\.\S+/.test(email);
 }
@@ -148,7 +162,8 @@ function generateAccessToken(user) {
       sub: user.user_id,
       email: user.email,
       username: user.username,
-      googleId: user.google_id
+      googleId: user.google_id,
+      role: getUserRole(user)
     },
     JWT_SECRET,
     { expiresIn: JWT_EXPIRY }
@@ -246,6 +261,10 @@ app.post('/auth/register', async (req, res) => {
     const userNameValue = username.trim();
     const emailValue = email.toLowerCase();
 
+    if (isOperatorIdentifier(userNameValue) || isOperatorIdentifier(emailValue)) {
+      return res.status(403).json({ error: 'This identifier is reserved' });
+    }
+
     const existingUserByEmail = await getUserByEmail(emailValue);
     if (existingUserByEmail) {
       return res.status(409).json({ error: 'User with this email already exists' });
@@ -275,6 +294,7 @@ app.post('/auth/register', async (req, res) => {
     return res.status(201).json({
       userId: user.user_id.toString(),
       email: user.email,
+      role: getUserRole(user),
       accessToken,
       refreshToken
     });
@@ -328,6 +348,7 @@ app.post('/auth/login', async (req, res) => {
     return res.json({
       userId: user.user_id.toString(),
       email: user.email,
+      role: getUserRole(user),
       accessToken,
       refreshToken
     });

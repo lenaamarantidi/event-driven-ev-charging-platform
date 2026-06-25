@@ -1,84 +1,191 @@
 import { useState, useEffect } from 'react';
-import axios from 'axios';
-import { BASE_URL, SERVICES } from '../config';
-import { analyticsAPI, providerAPI } from '../utils/apiClient';
+import { analyticsAPI, providerAPI, pointsAPI } from '../utils/apiClient';
+
+const PERIOD_OPTIONS = [
+  { value: '7d', label: 'Last 7 days' },
+  { value: '30d', label: 'Last 30 days' },
+  { value: '90d', label: 'Last 90 days' },
+  { value: '6months', label: 'Last 6 months' },
+  { value: 'yearly', label: 'Last year' },
+  { value: 'all', label: 'All time' }
+];
+
+const STATUS_OPTIONS = ['all', 'available', 'charging', 'reserved', 'held', 'offline', 'malfunction'];
+
+const toNumber = (value) => Number(value || 0);
+
+const getRankingFailedReservations = (provider) => {
+  if (provider.failedReservations !== undefined && provider.failedReservations !== null) {
+    return toNumber(provider.failedReservations);
+  }
+  return Math.max(0, toNumber(provider.totalReservations) - toNumber(provider.successfulReservations));
+};
+
+const getRankingSuccessRate = (provider) => {
+  if (provider.successRate !== undefined && provider.successRate !== null) {
+    return toNumber(provider.successRate);
+  }
+  const total = toNumber(provider.totalReservations);
+  if (total === 0) return 0;
+  return Number(((toNumber(provider.successfulReservations) / total) * 100).toFixed(2));
+};
+
+const normalizeProviderId = (provider) => (
+  provider.provider_id ?? provider.providerId ?? provider.id ?? provider.providerID
+);
+
+const normalizeProviderName = (provider) => (
+  provider.provider_name ?? provider.providerName ?? provider.name ?? `Provider ${normalizeProviderId(provider)}`
+);
+
+const normalizePointStatus = (point) => String(point.status || point.state || 'unknown').toLowerCase();
+
+const getBarWidth = (value, max) => {
+  if (!max) return '0%';
+  return `${Math.max(4, Math.round((Number(value || 0) / max) * 100))}%`;
+};
 
 const OperatorDashboard = ({ setToken }) => {
-  const [activeTab, setActiveTab] = useState('overview');
+  const [activeTab, setActiveTab] = useState('analytics');
   const [providers, setProviders] = useState([]);
+  const [filters, setFilters] = useState({
+    providerId: 'all',
+    providerName: 'all',
+    period: '30d',
+    status: 'all',
+    startDate: '',
+    endDate: ''
+  });
   const [systemMetrics, setSystemMetrics] = useState({
     totalProviders: 0,
-    totalStations: 0,
-    activeStations: 0,
+    totalPoints: 0,
+    availablePoints: 0,
+    occupiedPoints: 0,
+    unavailablePoints: 0,
     totalUsers: 0,
-    systemUtilization: 0,
-    totalTransactions: 0
+    uniqueUsers: 0,
+    totalReservations: 0,
+    successfulReservations: 0,
+    failedReservations: 0,
+    successRate: 0
   });
-  const [alerts, setAlerts] = useState([]);
+  const [pointStatusCounts, setPointStatusCounts] = useState({});
+  const [timeseries, setTimeseries] = useState([]);
+  const [rankings, setRankings] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState('');
 
   useEffect(() => {
     fetchOperatorData();
-  }, []);
+  }, [filters]);
 
   const fetchOperatorData = async () => {
+    setLoading(true);
+    setError('');
     try {
-      // Κάλεσμα στο Analytics Service για global metrics
-      // GET /api/analytics/global?period=monthly
-      const globalAnalyticsResult = await analyticsAPI.getGlobalAnalytics('monthly');
+      const analyticsFilters = {
+        providerId: filters.providerId,
+        startDate: filters.startDate,
+        endDate: filters.endDate
+      };
+      const pointsFilters = {
+        provider: filters.providerName,
+        status: filters.status
+      };
 
-      // Κάλεσμα στο Provider Management Service για λίστα providers
-      // GET /api/providers
-      const providersResult = await providerAPI.getAll();
-
-      // Κανονικοποίηση global metrics
-      if (globalAnalyticsResult.success) {
-        const data = globalAnalyticsResult.data;
-        setSystemMetrics({
-          totalProviders: data.total_providers || 0,
-          totalStations: data.total_stations || 0,
-          activeStations: data.active_stations || 0,
-          totalUsers: data.total_users || 0,
-          systemUtilization: data.system_utilization || 0,
-          totalTransactions: data.total_transactions || 0
-        });
-      } else {
-        console.warn('Global analytics error:', globalAnalyticsResult.error);
-      }
-
-      // Κανονικοποίηση providers list
-      // providerAPI.getAll() returns { total, providers: [...] }
-      if (providersResult.success && providersResult.data) {
-        const providerList = providersResult.data.providers || providersResult.data || [];
-        setProviders(providerList);
-      } else {
-        console.warn('Providers fetch error:', providersResult.error);
-      }
-
-      // Alert simulation - σε πραγματική περίπτωση θα ήταν από ένα alerts endpoint
-      setAlerts([
-        {
-          severity: 'info',
-          title: 'System Running Normally',
-          message: 'All services are operational',
-          time: new Date().toLocaleTimeString()
-        }
+      const [
+        globalAnalyticsResult,
+        globalTimeseriesResult,
+        globalRankingsResult,
+        providersResult,
+        pointsResult
+      ] = await Promise.all([
+        analyticsAPI.getGlobalAnalytics(filters.period, analyticsFilters),
+        analyticsAPI.getGlobalTimeseries(filters.period, analyticsFilters),
+        analyticsAPI.getGlobalRankings(filters.period, analyticsFilters),
+        providerAPI.getAll(),
+        pointsAPI.getAll(pointsFilters)
       ]);
 
-      setLoading(false);
+      if (!globalAnalyticsResult.success) {
+        throw new Error(globalAnalyticsResult.error || 'Global analytics unavailable');
+      }
+
+      const providerList = providersResult.success && providersResult.data
+        ? providersResult.data.providers || providersResult.data || []
+        : [];
+      const points = pointsResult.success
+        ? pointsResult.data.points || pointsResult.data || []
+        : [];
+      const statusCounts = points.reduce((acc, point) => {
+        const status = normalizePointStatus(point);
+        acc[status] = (acc[status] || 0) + 1;
+        return acc;
+      }, {});
+      const availablePoints = statusCounts.available || 0;
+      const occupiedPoints = ['charging', 'reserved', 'held', 'occupied']
+        .reduce((sum, status) => sum + (statusCounts[status] || 0), 0);
+      const unavailablePoints = ['offline', 'malfunction', 'unknown']
+        .reduce((sum, status) => sum + (statusCounts[status] || 0), 0);
+      const data = globalAnalyticsResult.data;
+
+      setProviders(providerList);
+      setPointStatusCounts(statusCounts);
+      setTimeseries(globalTimeseriesResult.success
+        ? globalTimeseriesResult.data.reservationsPerMonth || []
+        : []);
+      setRankings(globalRankingsResult.success
+        ? globalRankingsResult.data.providerRanking || []
+        : []);
+      setSystemMetrics({
+        totalProviders: data.totalProviders || providerList.length || 0,
+        totalPoints: points.length,
+        availablePoints,
+        occupiedPoints,
+        unavailablePoints,
+        totalUsers: data.totalUsers || 0,
+        uniqueUsers: data.uniqueUsers || 0,
+        totalReservations: data.totalReservations || 0,
+        successfulReservations: data.successfulReservations || 0,
+        failedReservations: data.failedReservations || 0,
+        successRate: data.successRate || 0
+      });
+
     } catch (err) {
       console.error('Error fetching operator data:', err);
+      setError(err.message || 'Failed to load global analytics');
       setSystemMetrics({
         totalProviders: 0,
-        totalStations: 0,
-        activeStations: 0,
+        totalPoints: 0,
+        availablePoints: 0,
+        occupiedPoints: 0,
+        unavailablePoints: 0,
         totalUsers: 0,
-        systemUtilization: 0,
-        totalTransactions: 0
+        uniqueUsers: 0,
+        totalReservations: 0,
+        successfulReservations: 0,
+        failedReservations: 0,
+        successRate: 0
       });
-      setProviders([]);
+      setPointStatusCounts({});
+      setTimeseries([]);
+      setRankings([]);
+    } finally {
       setLoading(false);
     }
+  };
+
+  const updateFilter = (field, value) => {
+    if (field === 'providerId') {
+      const selectedProvider = providers.find((provider) => String(normalizeProviderId(provider)) === String(value));
+      setFilters((prev) => ({
+        ...prev,
+        providerId: value,
+        providerName: value === 'all' ? 'all' : normalizeProviderName(selectedProvider || {})
+      }));
+      return;
+    }
+    setFilters((prev) => ({ ...prev, [field]: value }));
   };
 
   const handleLogout = () => {
@@ -88,36 +195,28 @@ const OperatorDashboard = ({ setToken }) => {
     setToken(null);
   };
 
-  const MetricCard = ({ title, value, unit, icon, color, trend }) => (
+  const MetricCard = ({ title, value, unit, icon, color }) => (
     <div className="col-md-6 col-lg-3 mb-3">
       <div className={`card border-start border-${color} border-5 h-100`}>
         <div className="card-body">
           <div className="d-flex justify-content-between align-items-start">
             <div>
-              <p className="text-muted small mb-1">{title}</p>
-              <h4 className="mb-0">{value}</h4>
-              {unit && <small className="text-muted">{unit}</small>}
-              {trend && <small className={`text-${trend > 0 ? 'success' : 'danger'}`}>{trend > 0 ? '↑' : '↓'} {Math.abs(trend)}%</small>}
+              <p className="small mb-1 text-white">{title}</p>
+              <h4 className="mb-0 text-white">{value}</h4>
+              {unit && <small className="text-white">{unit}</small>}
             </div>
-            <span className="fs-3">{icon}</span>
+            <span className="fs-3 text-white">{icon}</span>
           </div>
         </div>
       </div>
     </div>
   );
 
-  const AlertItem = ({ alert }) => (
-    <div className={`alert alert-${alert.severity === 'critical' ? 'danger' : alert.severity === 'warning' ? 'warning' : 'info'} mb-2`}>
-      <div className="d-flex justify-content-between">
-        <strong>{alert.title}</strong>
-        <small className="text-muted">{alert.time}</small>
-      </div>
-      <p className="mb-0 small">{alert.message}</p>
-    </div>
-  );
+  const maxTimeseriesValue = Math.max(...timeseries.map((item) => Number(item.count || 0)), 0);
+  const totalStatusPoints = Object.values(pointStatusCounts).reduce((sum, count) => sum + Number(count || 0), 0);
 
   return (
-    <div className="min-vh-100" style={{ backgroundColor: '#f8f9fa' }}>
+    <div className="min-vh-100 analytics-shell">
       {/* Header */}
       <nav className="navbar navbar-dark bg-dark sticky-top">
         <div className="container-fluid">
@@ -136,11 +235,11 @@ const OperatorDashboard = ({ setToken }) => {
         <ul className="nav nav-tabs mb-4" role="tablist">
           <li className="nav-item" role="presentation">
             <button
-              className={`nav-link ${activeTab === 'overview' ? 'active' : ''}`}
-              onClick={() => setActiveTab('overview')}
+              className={`nav-link ${activeTab === 'analytics' ? 'active' : ''}`}
+              onClick={() => setActiveTab('analytics')}
               type="button"
             >
-              📊 System Overview
+              📊 Global Analytics
             </button>
           </li>
           <li className="nav-item" role="presentation">
@@ -152,30 +251,109 @@ const OperatorDashboard = ({ setToken }) => {
               🏢 Providers
             </button>
           </li>
-          <li className="nav-item" role="presentation">
-            <button
-              className={`nav-link ${activeTab === 'alerts' ? 'active' : ''}`}
-              onClick={() => setActiveTab('alerts')}
-              type="button"
-            >
-              ⚠️ Alerts & Monitoring
-            </button>
-          </li>
-          <li className="nav-item" role="presentation">
-            <button
-              className={`nav-link ${activeTab === 'reports' ? 'active' : ''}`}
-              onClick={() => setActiveTab('reports')}
-              type="button"
-            >
-              📈 System Reports
-            </button>
-          </li>
         </ul>
 
-        {/* Overview Tab */}
-        {activeTab === 'overview' && (
+        {/* Global Analytics Tab */}
+        {activeTab === 'analytics' && (
           <div>
-            <h3 className="mb-4">System Overview</h3>
+            <div className="d-flex flex-wrap justify-content-between align-items-center gap-3 mb-4">
+              <div>
+                <h3 className="mb-1">Global Analytics</h3>
+                <p className="text-white mb-0">
+                  Network-wide analytics across charging points, providers, users, and reservations.
+                </p>
+              </div>
+              <button className="btn btn-outline-primary btn-sm" onClick={fetchOperatorData} disabled={loading}>
+                Refresh
+              </button>
+            </div>
+
+            <div className="card mb-4">
+              <div className="card-body">
+                <div className="row g-3 align-items-end">
+                  <div className="col-md-3">
+                    <label className="form-label">Provider</label>
+                    <select
+                      className="form-select"
+                      value={filters.providerId}
+                      onChange={(e) => updateFilter('providerId', e.target.value)}
+                    >
+                      <option value="all">All providers</option>
+                      {providers.map((provider) => {
+                        const providerId = normalizeProviderId(provider);
+                        return (
+                          <option key={providerId} value={providerId}>
+                            {normalizeProviderName(provider)}
+                          </option>
+                        );
+                      })}
+                    </select>
+                  </div>
+                  <div className="col-md-2">
+                    <label className="form-label">Period</label>
+                    <select
+                      className="form-select"
+                      value={filters.period}
+                      onChange={(e) => updateFilter('period', e.target.value)}
+                    >
+                      {PERIOD_OPTIONS.map((period) => (
+                        <option key={period.value} value={period.value}>{period.label}</option>
+                      ))}
+                    </select>
+                  </div>
+                  <div className="col-md-2">
+                    <label className="form-label">Point Status</label>
+                    <select
+                      className="form-select"
+                      value={filters.status}
+                      onChange={(e) => updateFilter('status', e.target.value)}
+                    >
+                      {STATUS_OPTIONS.map((status) => (
+                        <option key={status} value={status}>
+                          {status === 'all' ? 'All statuses' : status}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                  <div className="col-md-2">
+                    <label className="form-label">Start Date</label>
+                    <input
+                      className="form-control"
+                      type="date"
+                      value={filters.startDate}
+                      onChange={(e) => updateFilter('startDate', e.target.value)}
+                    />
+                  </div>
+                  <div className="col-md-2">
+                    <label className="form-label">End Date</label>
+                    <input
+                      className="form-control"
+                      type="date"
+                      value={filters.endDate}
+                      onChange={(e) => updateFilter('endDate', e.target.value)}
+                    />
+                  </div>
+                  <div className="col-md-1 d-grid">
+                    <button
+                      className="btn btn-outline-secondary"
+                      type="button"
+                      onClick={() => setFilters({
+                        providerId: 'all',
+                        providerName: 'all',
+                        period: '30d',
+                        status: 'all',
+                        startDate: '',
+                        endDate: ''
+                      })}
+                    >
+                      Reset
+                    </button>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            {error && <div className="alert alert-warning">{error}</div>}
             
             {loading ? (
               <div className="text-center p-5">
@@ -189,111 +367,163 @@ const OperatorDashboard = ({ setToken }) => {
                   <MetricCard
                     title="Total Providers"
                     value={systemMetrics.totalProviders || 0}
-                    unit="active"
+                    unit={filters.providerId === 'all' ? 'in scope' : 'selected'}
                     icon="🏢"
                     color="primary"
-                    trend={12}
                   />
                   <MetricCard
-                    title="Total Stations"
-                    value={systemMetrics.totalStations || 0}
-                    unit="network-wide"
+                    title="Charging Points"
+                    value={systemMetrics.totalPoints || 0}
+                    unit="matching filters"
                     icon="⚡"
                     color="success"
-                    trend={8}
                   />
                   <MetricCard
-                    title="Active Stations"
-                    value={systemMetrics.activeStations || 0}
-                    unit="online"
+                    title="Available Points"
+                    value={systemMetrics.availablePoints || 0}
+                    unit="ready"
                     icon="✅"
                     color="info"
-                    trend={5}
                   />
                   <MetricCard
-                    title="Total Users"
-                    value={systemMetrics.totalUsers || 0}
-                    unit="registered"
-                    icon="👥"
+                    title="Occupied Points"
+                    value={systemMetrics.occupiedPoints || 0}
+                    unit="charging/reserved"
+                    icon="⏱"
                     color="warning"
-                    trend={15}
                   />
                 </div>
 
                 <div className="row mb-4">
                   <MetricCard
-                    title="System Utilization"
-                    value={`${systemMetrics.systemUtilization || 0}%`}
-                    unit="capacity"
-                    icon="📈"
-                    color="success"
-                    trend={3}
+                    title="Reservations"
+                    value={systemMetrics.totalReservations || 0}
+                    unit="selected period"
+                    icon="📋"
+                    color="primary"
                   />
                   <MetricCard
-                    title="Total Transactions"
-                    value={systemMetrics.totalTransactions || 0}
-                    unit="this month"
-                    icon="💳"
+                    title="Successful"
+                    value={systemMetrics.successfulReservations || 0}
+                    unit={`${systemMetrics.successRate || 0}% success rate`}
+                    icon="✓"
+                    color="success"
+                  />
+                  <MetricCard
+                    title="Failed"
+                    value={systemMetrics.failedReservations || 0}
+                    unit="reservation attempts"
+                    icon="!"
+                    color="danger"
+                  />
+                  <MetricCard
+                    title="Users"
+                    value={filters.providerId === 'all' ? systemMetrics.totalUsers : systemMetrics.uniqueUsers}
+                    unit={filters.providerId === 'all' ? 'registered total' : 'unique in period'}
+                    icon="👥"
                     color="warning"
-                    trend={22}
                   />
                 </div>
 
                 <div className="row">
-                  <div className="col-lg-8">
+                  <div className="col-lg-7 mb-3">
                     <div className="card">
                       <div className="card-header bg-light">
-                        <h5 className="mb-0">System Health</h5>
+                        <h5 className="mb-0">Reservations Over Time</h5>
                       </div>
                       <div className="card-body">
-                        <div className="mb-3">
-                          <div className="d-flex justify-content-between mb-2">
-                            <span>Network Performance</span>
-                            <span className="text-success fw-bold">99.8%</span>
+                        {timeseries.length === 0 ? (
+                          <p className="text-muted mb-0">No reservation activity for the selected filters.</p>
+                        ) : (
+                          <div className="d-flex flex-column gap-3">
+                            {timeseries.slice(-12).map((point) => (
+                              <div key={point.month}>
+                                <div className="d-flex justify-content-between small mb-1">
+                                  <span>{point.month}</span>
+                                  <strong>{point.count}</strong>
+                                </div>
+                                <div className="progress" style={{ height: '14px' }}>
+                                  <div
+                                    className="progress-bar bg-primary"
+                                    style={{ width: getBarWidth(point.count, maxTimeseriesValue) }}
+                                  />
+                                </div>
+                              </div>
+                            ))}
                           </div>
-                          <div className="progress" style={{ height: '20px' }}>
-                            <div className="progress-bar bg-success" style={{ width: '99.8%' }}></div>
-                          </div>
-                        </div>
-
-                        <div className="mb-3">
-                          <div className="d-flex justify-content-between mb-2">
-                            <span>API Response Time</span>
-                            <span className="text-success fw-bold">45ms</span>
-                          </div>
-                          <div className="progress" style={{ height: '20px' }}>
-                            <div className="progress-bar bg-info" style={{ width: '75%' }}></div>
-                          </div>
-                        </div>
-
-                        <div className="mb-3">
-                          <div className="d-flex justify-content-between mb-2">
-                            <span>Database Load</span>
-                            <span className="text-warning fw-bold">68%</span>
-                          </div>
-                          <div className="progress" style={{ height: '20px' }}>
-                            <div className="progress-bar bg-warning" style={{ width: '68%' }}></div>
-                          </div>
-                        </div>
+                        )}
                       </div>
                     </div>
                   </div>
 
-                  <div className="col-lg-4">
+                  <div className="col-lg-5 mb-3">
                     <div className="card">
                       <div className="card-header bg-light">
-                        <h5 className="mb-0">Recent Alerts</h5>
+                        <h5 className="mb-0">Charging Point Status</h5>
                       </div>
-                      <div className="card-body" style={{ maxHeight: '300px', overflowY: 'auto' }}>
-                        {alerts.length === 0 ? (
-                          <p className="text-muted small mb-0">✅ No critical alerts</p>
+                      <div className="card-body">
+                        {totalStatusPoints === 0 ? (
+                          <p className="text-muted mb-0">No charging points found for the selected filters.</p>
                         ) : (
-                          alerts.slice(0, 3).map((alert, idx) => (
-                            <AlertItem key={idx} alert={alert} />
-                          ))
+                          Object.entries(pointStatusCounts)
+                            .sort((a, b) => b[1] - a[1])
+                            .map(([status, count]) => (
+                              <div key={status} className="mb-3">
+                                <div className="d-flex justify-content-between small mb-1">
+                                  <span className="text-capitalize">{status}</span>
+                                  <strong>{count}</strong>
+                                </div>
+                                <div className="progress" style={{ height: '14px' }}>
+                                  <div
+                                    className="progress-bar bg-success"
+                                    style={{ width: getBarWidth(count, totalStatusPoints) }}
+                                  />
+                                </div>
+                              </div>
+                            ))
                         )}
                       </div>
                     </div>
+                  </div>
+                </div>
+
+                <div className="card">
+                  <div className="card-header bg-light">
+                    <h5 className="mb-0">Provider Ranking</h5>
+                  </div>
+                  <div className="table-responsive">
+                    <table className="table table-hover mb-0">
+                      <thead>
+                        <tr className="table-light">
+                          <th>Rank</th>
+                          <th>Provider</th>
+                          <th>Total Reservations</th>
+                          <th>Successful</th>
+                          <th>Failed</th>
+                          <th>Success Rate</th>
+                          <th>Unique Users</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {rankings.length === 0 ? (
+                          <tr>
+                            <td colSpan="7" className="text-center text-muted py-4">
+                              No provider reservation data for the selected filters.
+                            </td>
+                          </tr>
+                        ) : rankings.map((provider) => (
+                          <tr key={`${provider.rank}-${provider.providerId}`}>
+                            <td>{provider.rank}</td>
+                            <td className="fw-bold">{provider.providerName}</td>
+                            <td>{toNumber(provider.totalReservations)}</td>
+                            <td>{toNumber(provider.successfulReservations)}</td>
+                            <td>{getRankingFailedReservations(provider)}</td>
+                            <td>{getRankingSuccessRate(provider)}%</td>
+                            <td>{toNumber(provider.uniqueUsers)}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
                   </div>
                 </div>
               </>
@@ -352,153 +582,6 @@ const OperatorDashboard = ({ setToken }) => {
           </div>
         )}
 
-        {/* Alerts Tab */}
-        {activeTab === 'alerts' && (
-          <div>
-            <h3 className="mb-4">System Alerts & Monitoring</h3>
-
-            <div className="row mb-4">
-              <div className="col-md-3">
-                <div className="card text-center">
-                  <div className="card-body">
-                    <h4 className="text-danger">
-                      {alerts.filter(a => a.severity === 'critical').length}
-                    </h4>
-                    <p className="text-muted mb-0">Critical Alerts</p>
-                  </div>
-                </div>
-              </div>
-              <div className="col-md-3">
-                <div className="card text-center">
-                  <div className="card-body">
-                    <h4 className="text-warning">
-                      {alerts.filter(a => a.severity === 'warning').length}
-                    </h4>
-                    <p className="text-muted mb-0">Warnings</p>
-                  </div>
-                </div>
-              </div>
-              <div className="col-md-3">
-                <div className="card text-center">
-                  <div className="card-body">
-                    <h4 className="text-info">
-                      {alerts.filter(a => a.severity === 'info').length}
-                    </h4>
-                    <p className="text-muted mb-0">Info Messages</p>
-                  </div>
-                </div>
-              </div>
-              <div className="col-md-3">
-                <div className="card text-center">
-                  <div className="card-body">
-                    <h4 className="text-success">{alerts.length}</h4>
-                    <p className="text-muted mb-0">Total Events</p>
-                  </div>
-                </div>
-              </div>
-            </div>
-
-            <div className="card">
-              <div className="card-header bg-light">
-                <h5 className="mb-0">Alert History</h5>
-              </div>
-              <div className="card-body" style={{ maxHeight: '500px', overflowY: 'auto' }}>
-                {alerts.length === 0 ? (
-                  <p className="text-muted">No alerts at this time.</p>
-                ) : (
-                  alerts.map((alert, idx) => (
-                    <AlertItem key={idx} alert={alert} />
-                  ))
-                )}
-              </div>
-            </div>
-          </div>
-        )}
-
-        {/* Reports Tab */}
-        {activeTab === 'reports' && (
-          <div>
-            <h3 className="mb-4">System Reports & Analytics</h3>
-
-            <div className="row">
-              <div className="col-md-6 mb-3">
-                <div className="card">
-                  <div className="card-header bg-light">
-                    <h5 className="mb-0">System Revenue</h5>
-                  </div>
-                  <div className="card-body">
-                    <div className="mb-3">
-                      <p className="text-muted small">Total Revenue (Current Month)</p>
-                      <h3>€45,250.00</h3>
-                    </div>
-                    <div className="mb-3">
-                      <p className="text-muted small">Daily Average</p>
-                      <h4>€1,508.33</h4>
-                    </div>
-                    <button className="btn btn-sm btn-outline-primary">Export Report</button>
-                  </div>
-                </div>
-              </div>
-
-              <div className="col-md-6 mb-3">
-                <div className="card">
-                  <div className="card-header bg-light">
-                    <h5 className="mb-0">Network Statistics</h5>
-                  </div>
-                  <div className="card-body">
-                    <div className="mb-3">
-                      <p className="text-muted small">Total Charging Sessions</p>
-                      <h3>8,432</h3>
-                    </div>
-                    <div className="mb-3">
-                      <p className="text-muted small">Average Session Duration</p>
-                      <h4>42 minutes</h4>
-                    </div>
-                    <button className="btn btn-sm btn-outline-primary">View Analytics</button>
-                  </div>
-                </div>
-              </div>
-
-              <div className="col-md-6 mb-3">
-                <div className="card">
-                  <div className="card-header bg-light">
-                    <h5 className="mb-0">User Growth</h5>
-                  </div>
-                  <div className="card-body">
-                    <div className="mb-3">
-                      <p className="text-muted small">New Users (This Month)</p>
-                      <h3>+542</h3>
-                    </div>
-                    <div className="mb-3">
-                      <p className="text-muted small">Active Users</p>
-                      <h4>12,458</h4>
-                    </div>
-                    <button className="btn btn-sm btn-outline-primary">View Details</button>
-                  </div>
-                </div>
-              </div>
-
-              <div className="col-md-6 mb-3">
-                <div className="card">
-                  <div className="card-header bg-light">
-                    <h5 className="mb-0">Provider Performance</h5>
-                  </div>
-                  <div className="card-body">
-                    <div className="mb-3">
-                      <p className="text-muted small">Average Availability</p>
-                      <h3>98.5%</h3>
-                    </div>
-                    <div className="mb-3">
-                      <p className="text-muted small">Service Quality Score</p>
-                      <h4>4.8/5.0</h4>
-                    </div>
-                    <button className="btn btn-sm btn-outline-primary">View Report</button>
-                  </div>
-                </div>
-              </div>
-            </div>
-          </div>
-        )}
       </div>
     </div>
   );

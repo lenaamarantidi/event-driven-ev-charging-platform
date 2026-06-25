@@ -3,6 +3,18 @@ import axios from 'axios';
 import { getServiceURL } from '../config';
 
 const Auth = ({ setToken, setUserRole }) => {
+  const operatorIdentifiers = (
+    import.meta.env.VITE_OPERATOR_IDENTIFIERS ||
+    'operator,admin,saas-operator,operator@charger.io,admin@charger.io'
+  )
+    .split(',')
+    .map((value) => value.trim().toLowerCase())
+    .filter(Boolean);
+
+  const isOperatorIdentifier = (value) => (
+    operatorIdentifiers.includes(String(value || '').trim().toLowerCase())
+  );
+
   const [isLogin, setIsLogin] = useState(true);
   const [role, setRole] = useState('ev_user');
   const [formData, setFormData] = useState({
@@ -15,6 +27,7 @@ const Auth = ({ setToken, setUserRole }) => {
     company_tin: '',
     base_url: '',
     api_key: '',
+    openapi_url: '',
     endpoint_list_points: '',
     endpoint_point_details: '',
     endpoint_reserve: '',
@@ -51,6 +64,7 @@ const Auth = ({ setToken, setUserRole }) => {
         password: formData.password,
         base_url: formData.base_url.trim(),
         api_key: formData.api_key.trim(),
+        openapi_url: formData.openapi_url.trim(),
         endpoint_list_points: formData.endpoint_list_points.trim(),
         endpoint_point_details: formData.endpoint_point_details.trim(),
         endpoint_reserve: formData.endpoint_reserve.trim(),
@@ -59,9 +73,15 @@ const Auth = ({ setToken, setUserRole }) => {
     }
 
     if (isLogin) {
+      const loginIdentifier = formData.login_email.trim();
+      const payload = { password: formData.password };
+      if (loginIdentifier.includes('@')) {
+        payload.email = loginIdentifier;
+      } else {
+        payload.username = loginIdentifier;
+      }
       return {
-        email: formData.login_email.trim(),
-        password: formData.password
+        ...payload
       };
     }
 
@@ -102,8 +122,10 @@ const Auth = ({ setToken, setUserRole }) => {
         } else {
           localStorage.setItem('username', formData.username.trim() || formData.login_email.trim());
         }
+        const resolvedRole = res.data.role ||
+          (role === 'ev_user' && isOperatorIdentifier(formData.login_email) ? 'operator' : role);
         setToken(token);
-        setUserRole(role === 'provider' ? 'provider' : 'ev_user');
+        setUserRole(resolvedRole);
       } else {
         alert(`${role === 'provider' ? 'Provider account' : 'Account'} created! Please login.`);
         setIsLogin(true);
@@ -157,6 +179,7 @@ const Auth = ({ setToken, setUserRole }) => {
       company_tin: '',
       base_url: '',
       api_key: '',
+      openapi_url: '',
       endpoint_list_points: '',
       endpoint_point_details: '',
       endpoint_reserve: '',
@@ -235,13 +258,24 @@ const Auth = ({ setToken, setUserRole }) => {
                     />
                   </div>
                   <div className="mb-3">
-                    <label>Base URL</label>
+                    <label>OpenAPI YAML URL</label>
+                    <input
+                      type="url"
+                      className="form-control"
+                      value={formData.openapi_url}
+                      onChange={handleFieldChange('openapi_url')}
+                      placeholder="https://provider.example.com/openapi.yaml"
+                      required
+                    />
+                  </div>
+                  <div className="mb-3">
+                    <label>Base URL fallback</label>
                     <input
                       type="url"
                       className="form-control"
                       value={formData.base_url}
                       onChange={handleFieldChange('base_url')}
-                      required
+                      placeholder="Optional if the YAML contains servers[0].url"
                     />
                   </div>
                   <div className="mb-3">
@@ -255,33 +289,33 @@ const Auth = ({ setToken, setUserRole }) => {
                     />
                   </div>
                   <div className="mb-3">
-                    <label>List Points Endpoint</label>
+                    <label>List Points Endpoint fallback</label>
                     <input
                       type="text"
                       className="form-control"
                       value={formData.endpoint_list_points}
                       onChange={handleFieldChange('endpoint_list_points')}
-                      required
+                      placeholder="Optional manual override"
                     />
                   </div>
                   <div className="mb-3">
-                    <label>Point Details Endpoint</label>
+                    <label>Point Details Endpoint fallback</label>
                     <input
                       type="text"
                       className="form-control"
                       value={formData.endpoint_point_details}
                       onChange={handleFieldChange('endpoint_point_details')}
-                      required
+                      placeholder="Optional manual override"
                     />
                   </div>
                   <div className="mb-3">
-                    <label>Reserve Endpoint</label>
+                    <label>Reserve Endpoint fallback</label>
                     <input
                       type="text"
                       className="form-control"
                       value={formData.endpoint_reserve}
                       onChange={handleFieldChange('endpoint_reserve')}
-                      required
+                      placeholder="Optional manual override"
                     />
                   </div>
                   <div className="mb-3">
@@ -311,12 +345,13 @@ const Auth = ({ setToken, setUserRole }) => {
             <>
               {isLogin ? (
                 <div className="mb-3">
-                  <label>Email</label>
+                  <label>Email or Username</label>
                   <input
-                    type="email"
+                    type="text"
                     className="form-control"
                     value={formData.login_email}
                     onChange={handleFieldChange('login_email')}
+                    placeholder="Email or username"
                     required
                   />
                 </div>

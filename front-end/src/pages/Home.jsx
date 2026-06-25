@@ -385,6 +385,7 @@ const Home = ({ setToken }) => {
                         charger={selectedCharger} 
                         filters={filters}
                         onClose={() => setInfoPanelOpen(false)}
+                        showClose={false}
                       />
                     </div>
                   </div>
@@ -424,6 +425,7 @@ const Home = ({ setToken }) => {
                           charger={selectedCharger} 
                           filters={filters}
                           onClose={() => setSelectedCharger(null)}
+                          showClose={false}
                         />
                       </div>
                     </div>

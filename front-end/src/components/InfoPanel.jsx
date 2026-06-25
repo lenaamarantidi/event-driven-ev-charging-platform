@@ -15,7 +15,7 @@ const resolveConnectorName = (value) => {
   return CONNECTOR_CODE_MAP[String(value)] || value;
 };
 
-const InfoPanel = ({ charger, filters, onClose }) => {
+const InfoPanel = ({ charger, filters, onClose, showClose = true }) => {
     const [state, setState] = useState('idle'); // idle, reserving
     const [modalWarning, setModalWarning] = useState(false);
   
@@ -219,7 +219,17 @@ const InfoPanel = ({ charger, filters, onClose }) => {
 
   return (
     <div>
-                <h3 className="mb-3">{locationName}</h3>
+        <div className="d-flex align-items-start justify-content-between gap-3 mb-3">
+            <h3 className="mb-0">{locationName}</h3>
+            {showClose && (
+                <button
+                    type="button"
+                    className="btn-close btn-close-white flex-shrink-0"
+                    aria-label="Close charging point details"
+                    onClick={onClose}
+                />
+            )}
+        </div>
         
         <div className="card p-3 mb-3">
                         <p className="mb-1"><strong>Address:</strong> {locationAddress}</p>

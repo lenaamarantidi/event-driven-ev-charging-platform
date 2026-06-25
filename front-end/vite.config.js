@@ -1,50 +1,54 @@
 import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
 
+const backendHost = process.env.VITE_BACKEND_HOST || '127.0.0.1'
+const backendBasePort = Number(process.env.BACKEND_BASE_PORT || 5511)
+const backendTarget = (offset) => `http://${backendHost}:${backendBasePort + offset}`
+
 // https://vite.dev/config/
 export default defineConfig({
   plugins: [react()],
   server: {
     proxy: {
       '/api/auth': {
-        target: 'http://127.0.0.1:3100',
+        target: backendTarget(6),
         changeOrigin: true,
         rewrite: (path) => path.replace(/^\/api/, ''),
       },
       '/api/providers': {
-        target: 'http://127.0.0.1:3101',
+        target: backendTarget(5),
         changeOrigin: true,
       },
       '/api/points': {
-        target: 'http://127.0.0.1:3001',
+        target: backendTarget(1),
         changeOrigin: true,
       },
       '/api/reserve': {
-        target: 'http://127.0.0.1:3009',
+        target: backendTarget(2),
         changeOrigin: true,
       },
       '/api/reservations': {
-        target: 'http://127.0.0.1:3009',
+        target: backendTarget(2),
         changeOrigin: true,
         rewrite: (path) => path.replace(/^\/api/, ''),
       },
       '/api/billing': {
-        target: 'http://127.0.0.1:3103',
+        target: backendTarget(3),
         changeOrigin: true,
         rewrite: (path) => path.replace(/^\/api/, ''),
       },
       '/api/payments': {
-        target: 'http://127.0.0.1:3107',
+        target: backendTarget(4),
         changeOrigin: true,
         rewrite: (path) => path.replace(/^\/api/, ''),
       },
       '/api/analytics': {
-        target: 'http://127.0.0.1:3106',
+        target: backendTarget(7),
         changeOrigin: true,
         rewrite: (path) => path.replace(/^\/api/, ''),
       },
       '/api/map': {
-        target: 'http://127.0.0.1:3105',
+        target: backendTarget(8),
         changeOrigin: true,
         rewrite: (path) => path.replace(/^\/api/, ''),
       },
