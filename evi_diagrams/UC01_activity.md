@@ -31,13 +31,13 @@ fork again
   |API Gateway|
   :Route Points Request;
 
-  |Points Service|
+  |Central Service|
   :Validate & Process Query Parameters;
   
-  |Database|
+  |Central DB|
   :Retrieve Matching Charging Points;
 
-  |Points Service|
+  |Central Service|
   :Return Charging Points List;
 
   |EV User UI|

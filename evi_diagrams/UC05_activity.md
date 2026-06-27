@@ -33,7 +33,7 @@ else (No)
   |Billing Service|
   :Validate Provider Identity;
   
-  |Database|
+  |Billing DB|
   :Query current_usage, outstanding_invoices,\nand payment_history;
 
   |Billing Service|
@@ -52,7 +52,7 @@ if (Request Current Invoice?) then (Yes)
   |Billing Service|
   :Determine Current Billing Period;
 
-  |Database|
+  |Billing DB|
   :Query Invoice for Current Period;
 
   |Billing Service|
@@ -70,7 +70,7 @@ if (Request Current Invoice?) then (Yes)
     :Calculate Monthly & Reservation Fees;
     :Generate or Regenerate\nInvoice & Line Items;
     
-    |Database|
+    |Billing DB|
     :Save New/Updated Invoice Record;
   endif
 

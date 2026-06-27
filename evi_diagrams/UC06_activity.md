@@ -22,7 +22,7 @@ fork
   :Route KPI Request;
   |Analytics Service|
   :Apply Analytics Filters;
-  |Database|
+  |Analytics DB|
   :Aggregate System Events;
   |Analytics Service|
   :Calculate Global KPIs\n(Applying Zero-Value Fallbacks);
@@ -33,7 +33,7 @@ fork again
   :Route Timeseries Request;
   |Analytics Service|
   :Apply Analytics Filters;
-  |Database|
+  |Analytics DB|
   :Group Events by Month;
   |Analytics Service|
   :Return Timeseries Data;
@@ -43,7 +43,7 @@ fork again
   :Route Rankings Request;
   |Analytics Service|
   :Apply Analytics Filters;
-  |Database|
+  |Analytics DB|
   :Aggregate Provider Data;
   |Analytics Service|
   :Calculate Provider Rankings;
@@ -59,7 +59,7 @@ fork again
 fork again
   |API Gateway|
   :Route Points Request;
-  |Points Service|
+  |Central Service|
   :Apply Status Filters;
   :Retrieve Charging Points;
   :Return Points List;

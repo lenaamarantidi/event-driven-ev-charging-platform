@@ -32,7 +32,7 @@ else (No)
     :Display Error Message;
     stop
   else (Yes)
-    |Database|
+    |Analytics DB|
     :Retrieve Provider Events;
     :Aggregate Monthly Data;
 
@@ -59,7 +59,7 @@ if (Change Period Filter?) then (Yes)
   |Analytics Service|
   :Apply Time Filters;
   
-  |Database|
+  |Analytics DB|
   :Retrieve Filtered Events;
   
   |Analytics Service|

@@ -33,7 +33,7 @@ if (Is Data Valid?) then (No)
   :Display Form Errors;
   stop
 else (Yes)
-  |Database|
+  |Provider DB|
   :Check Duplicate Name, Email, or TIN;
   
   |Provider Management Service|
@@ -47,7 +47,7 @@ else (Yes)
     :Secure Provider Credentials;
     :Determine Integration Status;
     
-    |Database|
+    |Provider DB|
     :Store New Provider Profile;
     
     |Provider Management Service|

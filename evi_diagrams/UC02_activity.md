@@ -28,8 +28,8 @@ else (Yes)
   |Reservation Service|
   :Request Point Details;
 
-  |Points Service|
-  :Lookup Point in Database;
+  |Central Service|
+  :Lookup Point in Central DB;
 
   |Reservation Service|
   if (Point Found?) then (No)
@@ -41,14 +41,14 @@ else (Yes)
     |Reservation Service|
     :Identify Point Provider;
 
-    |Provider Adapter|
+    |Provider Adapter (RedPlug/GreenPlug/BluePlug)|
     :Map Request to Provider Format;
     :Call External Provider API;
 
-    |Provider API|
+    |External Provider API|
     :Process Reservation Request;
 
-    |Provider Adapter|
+    |Provider Adapter (RedPlug/GreenPlug/BluePlug)|
     :Normalize Provider Response;
 
     |Reservation Service|
