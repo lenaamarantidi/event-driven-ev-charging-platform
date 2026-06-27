@@ -1,1315 +1,583 @@
+# Final Submission – UML Diagrams for SaaS Plug
 
-@startuml
-title UC02 - Reserve Charging Point (Current Implementation)
+This document consolidates the requested UML artifacts for submission. The content is organized from the existing implementation-aligned diagram sources, and only the missing titles were added where needed.
+
+---
+
+## 1. Activity Diagrams
+
+### UC01 – Search and View Charging Points
+
+```plantuml
+@startuml UC01_Search_View_Charging_Points_Activity
+title UC01: Search and View Charging Points - Activity Diagram
+
+!theme plain
+skinparam backgroundColor #FEFEFE
+skinparam activityBorderColor #2C3E50
+skinparam activityBackgroundColor #ECF0F1
+skinparam arrowColor #34495E
 
 |EV User|
 start
-:Select charging point;
-:Click "Reserve";
-:Enter reservation duration;
+:Open saasCharge Dashboard;
+:View Map Interface;
 
-|EV User UI|
-:Show reservation panel;
-:Validate basic UI input;
-:Call reservationAPI.createReservation();
+|Frontend|
+:Get Device Location;
+
+if (Location Permission Granted?) then (Yes)
+  :Use Current Coordinates;
+else (No)
+  :Use Default Location (Athens);
+endif
+
+:Request Charging Points Data;
 
 |API Gateway|
-:Receive POST /api/reserve;
-:Forward request to Reservation Service\nPOST /api/reserve;
+:Route Request to Central Service;
 
-|Reservation Service|
-:Validate request body;
-if (pointId exists and minutes valid?) then (yes)
-  :Create reservationId;
-else (no)
-  :Return 400 validation error;
-  |API Gateway|
-  :Forward error response;
-  |EV User UI|
-  :Display rejection message;
+|Central Service|
+:Validate Query Parameters;
+:Apply Location/Filter Criteria;
+
+|Central DB|
+:Retrieve Matching Charging Points;
+
+|Central Service|
+:Return Points List with Status;
+
+|Frontend|
+if (Data Retrieved Successfully?) then (Yes)
+  :Normalize Point Data;
+  :Calculate Distances;
+  :Render Interactive Map;
+  :Display Clustered Point Markers;
+else (No)
+  :Display Empty/Error State;
   stop
 endif
 
-|Message Broker / RabbitMQ|
-:Send RPC request to Points Service\nexchange: points.rpc\nrouting key: points.lookup.request;
-
-|Points Service|
-:Lookup pointId in central points DB;
-if (Point found?) then (yes)
-  :Return point snapshot\nincluding provider_name;
-else (no)
-  :Return not_found;
-endif
-
-|Reservation Service|
-if (Point found?) then (yes)
-  :Identify provider from Points lookup;
-else (no)
-  :Build failed reservation response;
+|EV User|
+if (User Adjusts Filters?) then (Yes)
+  :Modify Filter Selections\n(location, status, price, etc);
+  |Frontend|
+  :Request Updated Points Data;
   |API Gateway|
-  :Return 409 / not_found;
-  |EV User UI|
-  :Display rejection message;
-  stop
+  :Route Filtered Request;
+  |Central Service|
+  :Apply New Filters;
+  |Central DB|
+  :Retrieve Filtered Points;
+  |Frontend|
+  :Update Map Display;
 endif
 
-if (Requested provider matches lookup provider?) then (yes)
-  :Continue reservation flow;
-else (no)
-  :Return provider mismatch error;
-  |API Gateway|
-  :Forward error response;
-  |EV User UI|
-  :Display rejection message;
-  stop
+|EV User|
+if (Select Charging Point?) then (Yes)
+  |Frontend|
+  :Click on Point Marker/List Item;
+  
+  if (Full Details Cached Locally?) then (Yes)
+    :Display Info Panel\n(point data, price, status);
+  else (No)
+    |API Gateway|
+    :Route Details Request;
+    |Central Service|
+    :Retrieve Point Details;
+    |Frontend|
+    :Cache Point Details;
+    :Display Info Panel;
+  endif
+
+  |EV User|
+  if (Request Reservation?) then (Yes)
+    :Initiate Reservation Request\n(Proceed to UC02);
+    stop
+  else (No)
+    :Continue Browsing;
+  endif
 endif
-
-|Message Broker / RabbitMQ|
-:Send reservation RPC to provider adapter\nexchange: adapter.sync.requests\nrouting key: adapter.<provider>.reserve;
-
-|Provider Adapter|
-:Map unified request to provider-specific API;
-:Call external provider API;
-
-|Provider API|
-:Handle reservation / hold request;
-if (Request accepted?) then (yes)
-  :Return reserved/held response;
-else (no)
-  :Return failure response;
-endif
-
-|Provider Adapter|
-:Normalize provider response;
-:Return adapter RPC response;
-
-|Reservation Service|
-if (Provider returned reserved?) then (yes)
-  :Format reservation response;
-  :Mark reservation as confirmed;
-else (no)
-  :Build failed reservation response;
-  :Mark reservation as failed;
-endif
-
-|Reservation DB|
-:Insert reservation attempt into reservation_logs;
-
-|Reservation Service|
-if (Reservation successful?) then (yes)
-  |Message Broker / RabbitMQ|
-  :Publish reservation_successful\nexchange: reservation_exchange;
-
-  |Points Service|
-  :Update point status to reserved;
-  :Store reservation_end_time;
-  :Schedule reservation expiry;
-  :Notify frontend clients via SSE if connected;
-
-  |Reservation Service|
-  :Publish reservation.completed\nexchange: saas_events\nstatus = success;
-else (no)
-  :Publish reservation.completed\nexchange: saas_events\nstatus = failed;
-endif
-
-|Analytics Service|
-:Consume reservation.completed;
-:Insert reservation_events row;
-:Update provider_daily_stats;
-:Update global_daily_stats;
-
-|Reservation Service|
-:Return reservation result;
-
-|API Gateway|
-:Forward response to frontend;
-
-|EV User UI|
-if (Reservation successful?) then (yes)
-  :Display success message;
-  :Close reservation panel;
-else (no)
-  :Display rejection message;
-endif
-
-|Reservation Service|
-:Daily analytics batch also exists\nPublishes reservation logs once per day\nrouting key: analytics.reservations.daily;
-
-|Billing Service|
-:Not updated directly during reservation\nBilling later requests successful reservation counts\nfrom Analytics when generating invoices;
 
 stop
 @enduml
 ```
 
+### UC02 – Reserve Charging Point
+
 ```plantuml
-@startuml
-' ER - Auth DB
-title Auth DB - auth_db (Current Implementation)
+@startuml UC02_Reserve_Charging_Point_Activity_Perfect_Aligned
+title UC02: Reserve Charging Point - Activity Diagram
 
-hide circle
-skinparam linetype ortho
+!theme plain
+skinparam backgroundColor #FEFEFE
+skinparam activityBorderColor #2C3E50
+skinparam activityBackgroundColor #ECF0F1
+skinparam arrowColor #34495E
 
-entity "User" as User {
-  * user_id : INT UNSIGNED <<PK>>
-  --
-  username : VARCHAR(255) <<UQ>>
-  * email : VARCHAR(255) <<UQ>>
-  password_hash : VARCHAR(255)
-  google_id : VARCHAR(255) <<UQ>>
-  first_name : VARCHAR(100)
-  last_name : VARCHAR(100)
-  phone : VARCHAR(32)
-  refresh_token_hash : VARCHAR(255)
-  created_at : DATETIME
-  updated_at : DATETIME
-}
+|EV User UI|
+start
+:Select Charging Point;
+:Input Reservation Duration;
+:Submit Reservation Request;
 
-note right of User
-Single-table auth schema.
-No foreign keys to other service databases.
-end note
+|API Gateway|
+:Route request to Reservation Service;
 
+|Reservation Service|
+:Validate request data;
+
+if (Is data valid?) then (No)
+  :Return validation error;
+  |EV User UI|
+  :Display rejection message;
+  stop
+else (Yes)
+  |Reservation Service|
+  :Request point lookup;
+
+  |Central Service|
+  :Lookup point in Central DB;
+
+  |Reservation Service|
+  if (Point found?) then (No)
+    :Return not found error;
+    |EV User UI|
+    :Display rejection message;
+    stop
+  else (Yes)
+    |Reservation Service|
+    :Determine provider from point details;
+    :Request reservation via provider adapter;
+
+    |Provider Adapter (RedPlug/GreenPlug/BluePlug)|
+    :Map to provider-specific format;
+    :Send reservation RPC request;
+
+    |External Provider API|
+    :Process reservation request;
+
+    |Provider Adapter (RedPlug/GreenPlug/BluePlug)|
+    :Normalize provider response;
+
+    |Reservation Service|
+    :Log reservation attempt in Reservation DB;
+
+    if (Reservation confirmed?) then (No)
+      :Publish reservation.completed event to Analytics;
+      :Return failure response;
+      |EV User UI|
+      :Display failure message;
+      stop
+    else (Yes)
+      :Calculate reservation expiry time;
+      :Publish reservation_successful event;
+      :Publish reservation.completed event;
+
+      fork
+        |Central Service|
+        :Update point status;
+        :Set reservation end time;
+      fork again
+        |Billing Service|
+        :Process billable reservation event;
+      fork again
+        |Analytics Service|
+        :Process reservation completion event;
+      end fork
+
+      |Reservation Service|
+      :Return success response with expiry time;
+      |EV User UI|
+      :Display success message and expiry time;
+      stop
+    endif
+  endif
+endif
 @enduml
 ```
 
-```plantuml
-@startuml
-' ER - Provider Management DB
-title Provider Management DB - provider_db (Current Implementation)
-
-hide circle
-skinparam linetype ortho
-
-entity "providers" as providers {
-  * provider_id : INT UNSIGNED <<PK>>
-  --
-  * provider_name : VARCHAR(255) <<UQ>>
-  provider_email : VARCHAR(255) <<UQ>>
-  company_tin : VARCHAR(32) <<UQ>>
-  password_hash : VARCHAR(255)
-  adapter_name : VARCHAR(100)
-  integration_status : VARCHAR(50)
-  * base_url : VARCHAR(500)
-  * api_key : VARCHAR(255)
-  openapi_url : VARCHAR(500)
-  * endpoint_list_points : VARCHAR(500)
-  * endpoint_point_details : VARCHAR(500)
-  * endpoint_reserve : VARCHAR(500)
-  endpoint_reserve_duration : VARCHAR(500)
-  status : VARCHAR(50)
-  registered_at : TIMESTAMP
-  updated_at : TIMESTAMP
-}
-
-entity "provider_webhooks" as provider_webhooks {
-  * webhook_id : INT UNSIGNED <<PK>>
-  --
-  * provider_id : INT UNSIGNED <<FK>>
-  * event_type : VARCHAR(100)
-  * webhook_url : VARCHAR(500)
-  is_active : BOOLEAN
-  created_at : TIMESTAMP
-}
-
-providers ||--o{ provider_webhooks : "provider_id"
-
-@enduml
-```
+### UC03 – Provider Registration
 
 ```plantuml
-@startuml
-' ER - Reservation DB
-title Reservation DB - reservation_db (Current Implementation)
+@startuml UC03_Provider_Registration_Activity_Final_Perfect
+title UC03: Provider Registration - Activity Diagram
 
-hide circle
-skinparam linetype ortho
-
-entity "reservation_logs" as reservation_logs {
-  * id : INT <<PK>>
-  --
-  * reservation_id : VARCHAR(36) <<UQ>>
-  * provider_id : INT
-  * provider_name : VARCHAR(50)
-  * point_id : VARCHAR(100)
-  * duration : INT
-  user_id : VARCHAR(36)
-  status : VARCHAR(50)
-  reservation_details : JSON
-  created_at : TIMESTAMP
-  updated_at : TIMESTAMP
-}
-
-entity "reservation_statistics" as reservation_statistics {
-  * id : INT <<PK>>
-  --
-  * date_key : DATE
-  * provider_id : INT
-  * provider_name : VARCHAR(50)
-  total_reservations : INT
-  successful_reservations : INT
-  failed_reservations : INT
-  total_duration_minutes : INT
-  average_duration_minutes : INT
-  created_at : TIMESTAMP
-  updated_at : TIMESTAMP
-  --
-  <<UQ>> date_key, provider_id
-}
-
-note right of reservation_statistics
-Defined in Reservation_Service/db/schema.sql.
-The current service runtime mainly writes
-reservation_logs.
-end note
-
-@enduml
-```
-
-```plantuml
-@startuml
-' ER - Analytics DB
-title Analytics DB - analytics_db (Current Implementation)
-
-hide circle
-skinparam linetype ortho
-
-entity "user_registrations" as user_registrations {
-  * id : INT UNSIGNED <<PK>>
-  --
-  * userId : VARCHAR(255) <<UQ>>
-  createdAt : TIMESTAMP
-}
-
-entity "provider_registrations" as provider_registrations {
-  * id : INT UNSIGNED <<PK>>
-  --
-  * providerId : INT UNSIGNED <<UQ>>
-  * providerName : VARCHAR(255)
-  createdAt : TIMESTAMP
-}
-
-entity "reservation_events" as reservation_events {
-  * id : INT UNSIGNED <<PK>>
-  --
-  * reservationId : VARCHAR(255) <<UQ>>
-  * providerId : INT UNSIGNED
-  * providerName : VARCHAR(255)
-  * userId : VARCHAR(255)
-  pointId : VARCHAR(255)
-  * status : VARCHAR(50)
-  timestamp : TIMESTAMP
-}
-
-entity "provider_daily_stats" as provider_daily_stats {
-  * providerId : INT UNSIGNED <<PK>>
-  * date : DATE <<PK>>
-  --
-  totalReservations : INT UNSIGNED
-  successfulReservations : INT UNSIGNED
-  failedReservations : INT UNSIGNED
-  uniqueUsers : INT UNSIGNED
-}
-
-entity "global_daily_stats" as global_daily_stats {
-  * date : DATE <<PK>>
-  --
-  totalReservations : INT UNSIGNED
-  successfulReservations : INT UNSIGNED
-  failedReservations : INT UNSIGNED
-  newUsers : INT UNSIGNED
-  newProviders : INT UNSIGNED
-}
-
-entity "UsageEvent" as UsageEvent {
-  * event_id : INT UNSIGNED <<PK>>
-  --
-  provider_id : INT
-  user_id : INT
-  point_id : INT
-  reservation_id : INT
-  * event_type : VARCHAR(255)
-  event_time : TIMESTAMP
-  charge_amount : DECIMAL(10,2)
-  invoice_id : INT
-}
-
-note right of UsageEvent
-Created by Analytics_Service/db/init.sql.
-Current controllers and RabbitMQ handlers use
-user_registrations, provider_registrations,
-reservation_events, provider_daily_stats
-and global_daily_stats.
-end note
-
-@enduml
-```
-
-```plantuml
-@startuml
-' ER - Billing DB
-title Billing DB - billing_db (Current Implementation)
-
-hide circle
-skinparam linetype ortho
-
-entity "billable_events" as billable_events {
-  * event_id : INT UNSIGNED <<PK>>
-  --
-  * provider_id : INT UNSIGNED
-  * reservation_id : VARCHAR(36) <<UQ provider_id,reservation_id>>
-  * amount : DECIMAL(10,2)
-  event_type : VARCHAR(50)
-  created_at : TIMESTAMP
-  * billing_month : DATE
-}
-
-entity "invoices" as invoices {
-  * invoice_id : INT UNSIGNED <<PK>>
-  --
-  * provider_id : INT UNSIGNED
-  * billing_period_start : DATE
-  * billing_period_end : DATE
-  successful_reservations_count : INT UNSIGNED
-  monthly_fee : DECIMAL(10,2)
-  reservation_price : DECIMAL(10,2)
-  total_amount : DECIMAL(15,2)
-  tax_amount : DECIMAL(15,2)
-  grand_total : DECIMAL(15,2)
-  status : VARCHAR(50)
-  issued_at : TIMESTAMP
-  due_date : DATE
-  paid_at : TIMESTAMP
-  --
-  <<UQ>> provider_id, billing_period_start, billing_period_end
-}
-
-entity "invoice_line_items" as invoice_line_items {
-  * line_id : INT UNSIGNED <<PK>>
-  --
-  * invoice_id : INT UNSIGNED <<FK>>
-  * description : VARCHAR(255)
-  quantity : INT
-  * unit_price : DECIMAL(10,2)
-  * line_total : DECIMAL(15,2)
-}
-
-entity "pricing_config" as pricing_config {
-  * config_id : INT UNSIGNED <<PK>>
-  --
-  provider_id : INT UNSIGNED <<UQ>>
-  cost_per_reservation : DECIMAL(10,2)
-  cost_per_charging_hour : DECIMAL(10,2)
-  setup_fee : DECIMAL(10,2)
-  active : BOOLEAN
-  created_at : TIMESTAMP
-  updated_at : TIMESTAMP
-}
-
-entity "provider_pricing" as provider_pricing {
-  * provider_id : INT UNSIGNED <<PK>>
-  --
-  monthly_fee : DECIMAL(10,2)
-  reservation_price : DECIMAL(10,2)
-  created_at : TIMESTAMP
-  updated_at : TIMESTAMP
-}
-
-entity "current_usage" as current_usage {
-  * provider_id : INT UNSIGNED <<PK>>
-  --
-  * billing_period : DATE
-  successful_reservations : INT UNSIGNED
-  monthly_fee : DECIMAL(10,2)
-  reservation_price : DECIMAL(10,2)
-  estimated_amount : DECIMAL(15,2)
-  updated_at : TIMESTAMP
-}
-
-entity "payment_history" as payment_history {
-  * payment_id : INT UNSIGNED <<PK>>
-  --
-  * invoice_id : INT UNSIGNED
-  * provider_id : INT UNSIGNED
-  * amount : DECIMAL(15,2)
-  payment_method : VARCHAR(50)
-  reference : VARCHAR(255)
-  status : VARCHAR(50)
-  notes : VARCHAR(500)
-  paid_at : TIMESTAMP
-  --
-  <<UQ>> invoice_id, status
-}
-
-entity "billing_metadata" as billing_metadata {
-  * key_name : VARCHAR(255) <<PK>>
-  --
-  * value : VARCHAR(500)
-  created_at : TIMESTAMP
-  updated_at : TIMESTAMP
-}
-
-invoices ||--o{ invoice_line_items : "invoice_id"
-
-note right of payment_history
-invoice_id is used by the service logic,
-but no foreign key is declared in SQL.
-end note
-
-@enduml
-```
-
-```plantuml
-@startuml
-' ER - Payment DB
-title Payment DB - payment_db (Current Implementation)
-
-hide circle
-skinparam linetype ortho
-
-entity "Payment" as Payment {
-  * payment_id : INT UNSIGNED <<PK>>
-  --
-  invoice_id : INT UNSIGNED
-  provider_id : INT UNSIGNED
-  amount : DECIMAL(10,2)
-  payment_method : VARCHAR(100)
-  reference : VARCHAR(255)
-  notes : VARCHAR(500)
-  status : VARCHAR(255)
-  paid_at : TIMESTAMP
-}
-
-note right of Payment
-Separate Payment Service database.
-invoice_id and provider_id are logical references;
-no foreign keys to Billing DB are declared.
-end note
-
-@enduml
-```
-
-```plantuml
-@startuml
-' ER - Points DB / central
-title Points DB - central (Current Implementation)
-
-hide circle
-skinparam linetype ortho
-
-entity "points" as points {
-  * id : VARCHAR(36) <<PK>>
-  --
-  * point_id : VARCHAR(255)
-  * provider_name : VARCHAR(50)
-  * lon : DECIMAL(10,8)
-  * lat : DECIMAL(10,8)
-  * status : VARCHAR(50)
-  capacity_kw : INT
-  kwh_price : DECIMAL(10,4)
-  connector : VARCHAR(255)
-  location_name : VARCHAR(255)
-  address : VARCHAR(255)
-  reservation_end_time : TIMESTAMP
-  last_updated : TIMESTAMP
-  created_at : TIMESTAMP
-  --
-  <<UQ>> point_id, provider_name
-}
-
-entity "points_history" as points_history {
-  * id : VARCHAR(36) <<PK>>
-  --
-  * point_id : VARCHAR(255)
-  * provider_name : VARCHAR(50)
-  old_status : VARCHAR(50)
-  new_status : VARCHAR(50)
-  change_timestamp : TIMESTAMP
-}
-
-entity "provider_points" as provider_points {
-  * id : VARCHAR(36) <<PK>>
-  --
-  * provider_name : VARCHAR(50)
-  * point_id : VARCHAR(255)
-  imported_at : TIMESTAMP
-  --
-  <<UQ>> provider_name, point_id
-}
-
-points ||..o{ points_history : "status history\nby point_id + provider_name"
-provider_points ||..|| points : "tracks imported point\nby provider_name + point_id"
-
-note right of points
-Location and station data are embedded here.
-There are no separate Location or Station tables
-in the current central Points DB.
-end note
-
-@enduml
-```
-
-```plantuml
-@startuml
-' ER - Points Status Log / current equivalent
-title Points Status History - central (Current Implementation)
-
-hide circle
-skinparam linetype ortho
-
-entity "points" as points {
-  * id : VARCHAR(36) <<PK>>
-  --
-  * point_id : VARCHAR(255)
-  * provider_name : VARCHAR(50)
-  * lon : DECIMAL(10,8)
-  * lat : DECIMAL(10,8)
-  * status : VARCHAR(50)
-  capacity_kw : INT
-  kwh_price : DECIMAL(10,4)
-  connector : VARCHAR(255)
-  location_name : VARCHAR(255)
-  address : VARCHAR(255)
-  reservation_end_time : TIMESTAMP
-  last_updated : TIMESTAMP
-  created_at : TIMESTAMP
-  --
-  <<UQ>> point_id, provider_name
-}
-
-entity "points_history" as points_history {
-  * id : VARCHAR(36) <<PK>>
-  --
-  * point_id : VARCHAR(255)
-  * provider_name : VARCHAR(50)
-  old_status : VARCHAR(50)
-  new_status : VARCHAR(50)
-  change_timestamp : TIMESTAMP
-}
-
-points ||..o{ points_history : "status changes\nby point_id + provider_name"
-
-note right of points_history
-Replaces the old PointStatusLog idea.
-No status_log_id and no provider_id.
-The current schema stores provider_name,
-old_status and new_status.
-end note
-
-@enduml
-```
-
-```plantuml
-@startuml
-' UC03 - Provider Registration
-title UC03 - Provider Registration (Current Implementation)
+!theme plain
+skinparam backgroundColor #FEFEFE
+skinparam activityBorderColor #2C3E50
+skinparam activityBackgroundColor #ECF0F1
+skinparam arrowColor #34495E
 
 |Charging Points Provider|
 start
-:Open provider registration form;
-:Fill provider details;
-:Enter API base URL, API key,\nendpoint paths or OpenAPI URL;
-:Submit registration form;
+:Fill provider registration form;
+:Submit registration request;
 
 |Provider UI|
-:Validate required UI fields;
-:Call providerAPI.register();
+:Validate required fields;
+:Forward registration request;
 
 |API Gateway|
-:Receive POST /api/providers/register;
-:Forward request to Provider Management Service\nPOST /api/providers/register;
+:Route request to Provider Management Service;
 
 |Provider Management Service|
-:Read registration payload;
-if (OpenAPI URL provided?) then (yes)
-  :Fetch OpenAPI YAML/JSON;
-  :Discover base URL and endpoint paths;
-else (no)
-  :Use submitted endpoint configuration;
+:Resolve optional integration fields;
+if (OpenAPI URL provided?) then (Yes)
+  :Fetch OpenAPI spec from provider URL;
+  :Discover provider endpoints;
+else (No)
 endif
 
-:Validate provider_name;
-:Validate provider_email;
-:Validate company_tin;
-:Validate password length;
-:Validate base_url and api_key;
-:Validate list/details/reserve endpoints;
+:Validate provider details;
 
-if (Registration data valid?) then (yes)
-  :Normalize provider data;
-else (no)
-  :Return 400 validation error;
-  |API Gateway|
-  :Forward error response;
+if (Is data valid?) then (No)
+  :Return validation error;
   |Provider UI|
   :Display form errors;
   stop
-endif
-
-|Provider DB|
-:Check duplicate provider_name;
-:Check duplicate provider_email;
-:Check duplicate company_tin;
-
-|Provider Management Service|
-if (Provider already exists?) then (yes)
-  :Return 409 conflict error;
-  |API Gateway|
-  :Forward error response;
-  |Provider UI|
-  :Display duplicate provider error;
-  stop
-else (no)
-  :Hash provider password;
-  :Resolve adapter assignment;
-endif
-
-|Provider DB|
-:Insert provider record;
-:Store credentials and endpoint configuration;
-:Store adapter_name and integration_status;
-
-|Provider Management Service|
-:Load created provider without password hash;
-
-|Message Broker / RabbitMQ|
-:Publish provider.registered\nexchange: saas_events;
-
-|Analytics Service|
-:Consume provider.registered;
-:Insert provider_registrations row;
-
-|Provider Management Service|
-:Return registration success\nwith provider_id and endpoints;
-
-|API Gateway|
-:Forward success response to frontend;
-
-|Provider UI|
-:Store providerId locally;
-:Display registration success;
-:Open provider dashboard;
-
-|Provider Management Service|
-if (Known built-in provider?) then (redPlug/greenPlug/bluePlug)
-  :Mark integration_status = integrated;
-  :Assign existing provider adapter;
-else (custom provider)
-  :Mark integration_status = integration_pending;
-  :No dynamic adapter is started automatically;
-endif
-
-|Points Service|
-:Provider point synchronization is not triggered\nby registration automatically;
-:Points are loaded through existing adapters\nor manual/scheduled repopulation flow;
-
-stop
-@enduml
-```
-
-```plantuml
-@startuml
-' UC04 - Provider Analytics
-title UC04 - Provider Analytics (Current Implementation)
-
-|Charging Points Provider|
-start
-:Open Provider Dashboard;
-:Select Analytics tab;
-
-|Provider UI|
-:Read providerId from localStorage;
-:Check if analytics were already fetched today;
-
-if (Cached analytics available?) then (yes)
-  :Use local dashboard state;
-else (no)
-  :Request provider KPI summary;
-  :Request provider timeseries;
-endif
-
-|API Gateway|
-:Receive GET /api/analytics/providers/{providerId};
-:Forward request to Analytics Service;
-
-|Analytics Service|
-:Validate providerId;
-
-if (providerId valid?) then (yes)
-  |Analytics DB|
-  :Read provider_registrations;
-  :Aggregate reservation_events\nfor selected provider;
-
-  |Analytics Service|
-  :Calculate total reservations;
-  :Calculate successful reservations;
-  :Calculate failed reservations;
-  :Calculate unique users;
-  :Calculate success rate;
-else (no)
-  :Return 400 invalid providerId;
-  |API Gateway|
-  :Forward error response;
-  |Provider UI|
-  :Display analytics error;
-  stop
-endif
-
-|API Gateway|
-:Receive GET /api/analytics/providers/{providerId}/timeseries;
-:Forward request to Analytics Service;
-
-|Analytics Service|
-:Validate providerId;
-
-|Analytics DB|
-:Group reservation_events by month;
-:Count reservations per month;
-:Count unique users per month;
-
-|Analytics Service|
-:Return KPI summary and timeseries responses;
-
-|API Gateway|
-:Forward analytics responses to frontend;
-
-|Provider UI|
-:Store KPI values in dashboard state;
-:Store reservationsPerMonth;
-:Store usersPerMonth;
-:Render analytics cards;
-:Render six-month charts;
-:Mark analytics as fetched today;
-
-|Charging Points Provider|
-:View analytics dashboard;
-
-if (Provider changes period filter?) then (yes)
-  |Provider UI|
-  :Calculate startDate and endDate\nfor day/week/month;
-  :Request provider logs export as JSON;
-
-  |API Gateway|
-  :Receive GET /api/analytics/providers/{providerId}/export;
-  :Forward request to Analytics Service;
-
-  |Analytics Service|
-  :Validate providerId;
-  :Apply startDate/endDate filters;
-
-  |Analytics DB|
-  :Read matching reservation_events;
-
-  |Analytics Service|
-  :Return JSON reservation logs;
-
-  |API Gateway|
-  :Forward logs response to frontend;
-
-  |Provider UI|
-  :Calculate period totals locally;
-  :Calculate period success rate locally;
-  :Update period analytics panel;
-else (no)
-  :Keep current analytics view;
-endif
-
-if (Provider requests log export?) then (yes)
-  |Provider UI|
-  :Request CSV or JSON export;
-
-  |API Gateway|
-  :Forward export request;
-
-  |Analytics Service|
-  :Query reservation_events;
-  :Return downloadable logs;
-
-  |Provider UI|
-  :Download or display exported logs;
-else (no)
-  :No export action;
-endif
-
-stop
-@enduml
-```
-
-```plantuml
-@startuml
-' UC05 - Provider Billing and Invoice Payment
-title UC05 - Provider Billing and Invoice Payment (Current Implementation)
-
-|Charging Points Provider|
-start
-:Open Provider Dashboard;
-:Select Billing tab;
-
-|Provider UI|
-:Read providerId from localStorage;
-:Check if billing data were already fetched today;
-
-if (Cached billing data available?) then (yes)
-  :Use local dashboard state;
-else (no)
-  :Request invoice history;
-  :Request billing summary;
-endif
-
-|API Gateway|
-:Receive GET /api/billing/invoices/{providerId};
-:Forward request to Billing Service;
-
-|Billing Service|
-:Validate providerId;
-
-|Billing DB|
-:Read invoices for provider;
-:Read invoice line items;
-
-|Billing Service|
-:Return invoice history;
-
-|API Gateway|
-:Receive GET /api/billing/summary/{providerId};
-:Forward request to Billing Service;
-
-|Billing Service|
-:Validate providerId;
-
-|Billing DB|
-:Read current_usage;
-:Read outstanding invoices;
-:Read payment history;
-
-|Billing Service|
-:Return billing summary;
-
-|API Gateway|
-:Forward invoice history and summary;
-
-|Provider UI|
-:Store invoice history;
-:Store billing summary;
-:Display detailed invoice and billing screen;
-:Mark billing data as fetched today;
-
-|Charging Points Provider|
-if (Provider requests current invoice?) then (yes)
-  |Provider UI|
-  :Request current invoice;
-
-  |API Gateway|
-  :Receive GET /api/billing/invoice/{providerId};
-  :Forward request to Billing Service;
-
-  |Billing Service|
-  :Determine current billing period;
-
-  |Billing DB|
-  :Check if invoice already exists;
-
-  |Billing Service|
-  if (Invoice already exists?) then (yes)
-    :Use existing invoice;
-  else (no)
-    :Request successful reservation count\nfrom Analytics Service;
-
-    |Analytics Service|
-    :Receive POST /analytics/billing/request;
-    :Validate providerId and period;
-
-    |Analytics DB|
-    :Count successful reservation_events\nfor provider and billing period;
-
-    |Analytics Service|
-    :Return successfulReservationsCount;
-
-    |Billing Service|
-    :Load provider pricing;
-    :Calculate monthly fee;
-    :Calculate reservation fees;
-    :Create invoice and line items;
-
-    |Billing DB|
-    :Save new invoice;
-    :Save invoice_line_items;
-  endif
-
-  |Billing Service|
-  :Return invoice data;
-
-  |API Gateway|
-  :Forward invoice response;
-
-  |Provider UI|
-  :Display current invoice;
-else (no)
-  :Keep invoice history view;
-endif
-
-|Charging Points Provider|
-if (Provider clicks Pay invoice?) then (yes)
-  |Provider UI|
-  :Submit payment request;
-
-  |API Gateway|
-  :Receive POST /api/billing/invoices/{providerId}/{invoiceId}/pay;
-  :Forward request to Billing Service;
-
-  |Billing Service|
-  :Validate providerId and invoiceId;
-
-  |Billing DB|
-  :Load pending invoice;
-
-  |Billing Service|
-  if (Invoice payable?) then (yes)
-    :Call Payment Service\nPOST /api/payments;
-  else (no)
-    :Return payment error;
-    |API Gateway|
-    :Forward error response;
+else (Yes)
+  |Provider DB|
+  :Check duplicate provider name, email, or TIN;
+  
+  |Provider Management Service|
+  if (Duplicate found?) then (Yes)
+    :Return conflict error;
     |Provider UI|
-    :Display payment failure;
+    :Display duplicate error message;
+    stop
+  else (No)
+    |Provider Management Service|
+    :Hash provider password;
+    :Determine adapter assignment and integration status;
+    
+    |Provider DB|
+    :Store new provider profile;
+    
+    |Provider Management Service|
+    :Publish provider.registered event;
+    
+    fork
+      |Analytics Service|
+      :Process provider registration event;
+      :Update registration statistics;
+    fork again
+      |Provider UI|
+      :Display registration success;
+      :Prompt provider to login;
+    end fork
+    
     stop
   endif
+endif
+@enduml
+```
 
-  |Payment Service|
-  :Create Payment record;
+### UC04 – Provider Analytics
 
-  |Payment DB|
-  :Store payment with status paid;
+```plantuml
+@startuml UC04_Provider_Analytics_Activity_Final_Complete
+title UC04: Provider Analytics - Activity Diagram
 
-  |Payment Service|
-  :Publish payment.processed event\nthrough Message Broker HTTP API;
+!theme plain
+skinparam backgroundColor #FEFEFE
+skinparam activityBorderColor #2C3E50
+skinparam activityBackgroundColor #ECF0F1
+skinparam arrowColor #34495E
 
-  |Message Broker / RabbitMQ|
-  :Validate event payload;
-  :Publish canonical payment.processed event;
-  :Deliver event to subscribed Billing webhook;
+|Charging Points Provider|
+start
+:Open Provider Dashboard;
+:Select Analytics Tab;
 
-  |Billing Service|
-  :Receive payment.processed webhook;
-  :Validate event and invoice data;
+|Provider UI|
+:Check Local Data Cache;
 
-  |Billing DB|
-  :Update invoice status to PAID;
-  :Insert payment_history row;
-
-  |Billing Service|
-  :Return payment success;
+if (Is Data Cached Locally?) then (Yes)
+  :Load Dashboard from Cache;
+else (No)
+  :Request KPIs & 6-Month Timeseries;
 
   |API Gateway|
-  :Forward payment response;
+  :Route Request to Analytics Service;
+
+  |Analytics Service|
+  :Validate Provider Identity;
+
+  if (Is Provider Valid?) then (No)
+    :Return Validation Error;
+    |Provider UI|
+    :Display Error Message;
+    stop
+  else (Yes)
+    |Analytics DB|
+    :Retrieve Provider Events;
+    :Aggregate Monthly Data;
+
+    |Analytics Service|
+    :Calculate KPIs & Success Rates;
+    :Generate Timeseries Data;
+    :Return Analytics Response;
+
+    |Provider UI|
+    :Cache Analytics Locally;
+    :Render Dashboard Charts & Metrics;
+  endif
+endif
+
+|Charging Points Provider|
+:Review Analytics Dashboard;
+
+if (Change Period Filter?) then (Yes)
+  :Select New Timeframe;
+  
+  |Provider UI|
+  :Request Filtered Data;
+
+  |Analytics Service|
+  :Apply Time Filters;
+  
+  |Analytics DB|
+  :Retrieve Filtered Events;
+  
+  |Analytics Service|
+  :Return Filtered Data;
+  
+  |Provider UI|
+  :Recalculate Metrics Locally;
+  :Update Dashboard View;
+else (No)
+endif
+
+|Charging Points Provider|
+if (Request Data Export?) then (Yes)
+  :Select Export Format (JSON/CSV);
+  
+  |Provider UI|
+  :Request Export File;
+
+  |Analytics Service|
+  :Generate Exportable Logs;
 
   |Provider UI|
-  :Refresh invoice history and summary;
-  :Display payment successful;
-else (no)
-  |Provider UI|
-  :Remain on billing screen;
+  :Provide File Download to User;
+else (No)
+endif
+
+|Charging Points Provider|
+if (Request Invoice Generation?) then (Yes)
+  :Initiate Invoice Request\n(Proceed to UC05);
+else (No)
 endif
 
 stop
 @enduml
 ```
 
+### UC05 – Provider Billing and Invoice View
+
 ```plantuml
-@startuml
-' UC06 - Operator Global Analytics Dashboard
-title UC06 - Operator Global Analytics Dashboard (Current Implementation)
+@startuml UC05_Provider_Billing_Activity_Strict
+title UC05: Provider Billing and Invoice View - Activity Diagram
+
+!theme plain
+skinparam backgroundColor #FEFEFE
+skinparam activityBorderColor #2C3E50
+skinparam activityBackgroundColor #ECF0F1
+skinparam arrowColor #34495E
+
+|Charging Points Provider|
+start
+:Open Provider Dashboard;
+:Select Billing Tab;
+
+|Provider UI|
+:Check Local Data Cache;
+
+if (Is Billing Data Cached Today?) then (Yes)
+  :Load Dashboard from Cache;
+else (No)
+  |Provider UI|
+  fork
+    :Fetch Billing Summary;
+  fork again
+    :Fetch Outstanding Invoices;
+  fork again
+    :Fetch Payment History;
+  end fork
+
+  |API Gateway|
+  :Route Requests to Billing Service;
+
+  |Billing Service|
+  :Validate Provider Identity;
+  
+  |Billing DB|
+  :Query current_usage, outstanding_invoices,\nand payment_history;
+
+  |Billing Service|
+  :Return Billing Data Responses;
+
+  |Provider UI|
+  :Cache Billing Data Locally;
+  :Render Billing Dashboard;
+endif
+
+|Charging Points Provider|
+if (Request Current Invoice?) then (Yes)
+  |Provider UI|
+  :Request Current Invoice Data;
+
+  |Billing Service|
+  :Determine Current Billing Period;
+
+  |Billing DB|
+  :Query Invoice for Current Period;
+
+  |Billing Service|
+  if (Invoice Exists AND is PAID?) then (Yes)
+    :Use Existing Paid Invoice;
+  else (No / Not Paid)
+    |Billing Service|
+    :Request Billing Stats\n(fetchBillingStats);
+
+    |Analytics Service|
+    :Count successfulReservationsCount\nfor Billing Period;
+    :Return Reservation Count;
+
+    |Billing Service|
+    :Calculate Monthly & Reservation Fees;
+    :Generate or Regenerate\nInvoice & Line Items;
+    
+    |Billing DB|
+    :Save New/Updated Invoice Record;
+  endif
+
+  |Billing Service|
+  :Return Current Invoice Data;
+
+  |Provider UI|
+  :Display Current Invoice;
+
+  |Charging Points Provider|
+  if (Click "Pay Invoice"?) then (Yes)
+    :Initiate Payment Request\n(Proceed to UC07);
+  else (No)
+  endif
+
+else (No)
+  :Maintain Current View;
+endif
+
+stop
+@enduml
+```
+
+### UC06 – Operator Global Analytics Dashboard
+
+```plantuml
+@startuml UC06_Operator_Dashboard_Activity_Strict
+title UC06: Operator Global Analytics Dashboard - Activity Diagram
+
+!theme plain
+skinparam backgroundColor #FEFEFE
+skinparam activityBorderColor #2C3E50
+skinparam activityBackgroundColor #ECF0F1
+skinparam arrowColor #34495E
 
 |saasPlug Operator|
 start
 :Open Operator Dashboard;
-:Select filters\nperiod, provider, status, date range;
-:Submit / refresh dashboard;
+:Select filters (period, provider, status);
+:Submit dashboard request;
 
 |Operator UI|
-:Build analytics filters;
-:Build points filters;
-:Send parallel API requests;
+:Prepare filter parameters;
+:Request dashboard data;
 
 fork
   |API Gateway|
-  :Receive GET /api/analytics/global;
-  :Forward request to Analytics Service;
-
+  :Route global analytics request;
   |Analytics Service|
-  :Parse period, providerId,\nstartDate and endDate;
-  :Build SQL filters;
-
+  :Apply analytics filters;
   |Analytics DB|
-  :Count user_registrations;
-  :Count provider_registrations;
-  :Aggregate reservation_events;
-
+  :Query aggregated analytics events;
   |Analytics Service|
-  if (Analytics data exists?) then (yes)
-    :Calculate total reservations;
-    :Calculate successful reservations;
-    :Calculate failed reservations;
-    :Calculate unique users;
-    :Calculate unique points;
-    :Calculate success rate;
-    :Return global KPI response;
-  else (no)
-    :Return zero-valued global KPI response;
-  endif
+  :Calculate global metrics;
+  :Return global analytics;
+
 fork again
   |API Gateway|
-  :Receive GET /api/analytics/global/timeseries;
-  :Forward request to Analytics Service;
-
+  :Route timeseries analytics request;
   |Analytics Service|
-  :Parse filters;
-
+  :Apply analytics filters;
   |Analytics DB|
-  :Group reservation_events by month;
-  :Count reservations per month;
-  :Count unique users per month;
-  :Count provider registrations per month;
-
+  :Query reservation timeseries data;
   |Analytics Service|
-  :Return global timeseries response;
+  :Return timeseries analytics;
+
 fork again
   |API Gateway|
-  :Receive GET /api/analytics/global/rankings;
-  :Forward request to Analytics Service;
-
+  :Route rankings analytics request;
   |Analytics Service|
-  :Parse filters;
-
+  :Apply analytics filters;
   |Analytics DB|
-  :Aggregate reservation_events by provider;
-
+  :Query provider ranking data;
   |Analytics Service|
-  :Calculate provider rankings;
-  :Return rankings response;
+  :Return provider rankings;
+
 fork again
   |API Gateway|
-  :Receive GET /api/providers;
-  :Forward request to Provider Management Service;
-
+  :Route provider list request;
   |Provider Management Service|
-  :Load active providers;
-
-  |Provider DB|
-  :Read providers table;
-
-  |Provider Management Service|
+  :Query Provider DB for active providers;
   :Return provider list;
+
 fork again
   |API Gateway|
-  :Receive GET /api/points;
-  :Forward request to Points Service;
-
-  |Points Service|
-  :Apply provider and status filters;
-
-  |Central Points DB|
-  :Read matching charging points;
-
-  |Points Service|
+  :Route charging points request;
+  |Central Service|
+  :Apply status filters;
+  :Query Central DB for charging points;
   :Return points list;
 end fork
 
 |Operator UI|
-if (Global analytics request successful?) then (yes)
-  :Normalize provider list;
-  :Normalize point list;
-  :Calculate status counts locally;
-  :Calculate available points count;
-  :Store KPI, timeseries,\nrankings, providers and points;
-  :Render operator dashboard;
-else (no)
-  :Display analytics error;
+if (Data fetch successful?) then (Yes)
+  :Normalize provider and point lists;
+  :Compute local status counts;
+  :Store dashboard data in UI state;
+  :Render Operator Dashboard;
+else (No)
+  :Display data fetch error;
   stop
 endif
 
 |saasPlug Operator|
-:View global KPIs;
-:View reservation trends;
-:View provider rankings;
-:View provider and point status overview;
+:Review global KPIs and trends;
+:Review provider rankings and point status;
 
-if (Operator changes filters?) then (yes)
+if (Change filters?) then (Yes)
   |Operator UI|
-  :Update selected filters;
-  :Fetch operator data again;
-else (no)
-  :Keep current dashboard view;
+  :Update filter state;
+  :Trigger data refresh;
+else (No)
+  :Maintain current view;
 endif
 
 stop
 @enduml
 ```
 
-```plantuml
-@startuml
-' UC01 - View and Search Charging Points
-title UC01 - View and Search Charging Points (Current Implementation)
+---
 
-|EV User|
-start
-:Open EV User Map page;
+## 2. Sequence Diagrams
 
-|EV User UI|
-:Initialize React map view;
-:Set default location to Athens;
-:Request browser geolocation;
-
-|Browser Geolocation|
-if (Location permission granted?) then (yes)
-  :Return user coordinates;
-  |EV User UI|
-  :Update userLocation;
-else (no)
-  :Return geolocation error;
-  |EV User UI|
-  :Keep default Athens location;
-  :Show location warning;
-endif
-
-|EV User UI|
-:Open SSE connection\n/api/points/events;
-
-|API Gateway|
-:Proxy SSE request to Points Service;
-
-|Points Service|
-:Register frontend as SSE client;
-
-|EV User UI|
-:Build point filters\nlat, lon, radius, cost, power,\navailability, connector, AC/DC;
-:Call pointsAPI.getAll();
-
-|API Gateway|
-:Receive GET /api/points;
-:Forward request to Points Service;
-
-|Points Service|
-:Validate query filters;
-:Convert availability filters to statuses;
-:Convert connector labels to connector codes;
-:Build SQL query;
-
-|Central Points DB|
-:Fetch matching charging points;
-
-|Points Service|
-:Return points list;
-
-|API Gateway|
-:Forward points response;
-
-|EV User UI|
-if (Points response successful?) then (yes)
-  :Normalize heterogeneous point fields;
-  :Calculate distance from user location;
-  :Sort charging points by distance;
-  :Store chargers and filteredChargers;
-else (no)
-  :Clear charger list;
-  :Show no charging points / error state;
-endif
-
-|OpenStreetMap Tiles|
-:Provide map tiles to Leaflet;
-
-|EV User UI|
-:Render Leaflet map;
-:Render user marker;
-:Render clustered charging point markers;
-:Color markers by outlet/status;
-
-|EV User|
-if (User searches location?) then (yes)
-  :Type search text and press Enter;
-
-  |EV User UI|
-  :Call Nominatim geocoding API directly;
-
-  |Nominatim API|
-  if (Location found?) then (yes)
-    :Return latitude and longitude;
-    |EV User UI|
-    :Update map center;
-    :Fetch points again with new coordinates;
-  else (no)
-    :Return empty result;
-    |EV User UI|
-    :Show location not found message;
-  endif
-else (no)
-  :Continue with current map location;
-endif
-
-|EV User|
-if (User changes filters?) then (yes)
-  :Select filters in sidebar;
-
-  |EV User UI|
-  :Update local filter state;
-  :Fetch points again with filters;
-else (no)
-  :Keep current filters;
-endif
-
-|EV User|
-if (User selects charging point?) then (yes)
-  :Click marker or list item;
-
-  |EV User UI|
-  :Set selectedCharger;
-  :Open InfoPanel;
-
-  if (Point already contains outlet data?) then (yes)
-    :Use outlet data from selected point;
-  else (no)
-    :Request location details;
-
-    |API Gateway|
-    :Receive GET /api/ui/location/{pointId};
-    :Forward request if route exists;
-
-    |EV User UI|
-    :Use returned outlet details\nor show empty details on failure;
-  endif
-
-  :Display charging point details;
-  :Display connector, power, price,\nstatus and distance;
-else (no)
-  :Keep map/list view;
-endif
-
-|Points Service|
-if (Point status changes later?) then (yes)
-  :Send SSE point update;
-
-  |EV User UI|
-  :Normalize updated point;
-  :Update marker and selected panel;
-else (no)
-  :No realtime update;
-endif
-
-|EV User|
-if (User requests navigation?) then (yes)
-  |EV User UI|
-  :Open Google Maps directions URL;
-else (no)
-  :Remain on point details;
-endif
-
-stop
-@enduml
-```
+### UC01 – View and Search Charging Points
 
 ```plantuml
 @startuml
-' Sequence UC01 - View and Search Charging Points
+'t Sequence UC01 - View and Search Charging Points
 title UC01 - View and Search Charging Points (Current Implementation)
 
 actor "EV User" as User
@@ -1453,6 +721,8 @@ deactivate CentralService
 deactivate UI
 @enduml
 ```
+
+### UC02 – Reserve Charging Point
 
 ```plantuml
 @startuml
@@ -1611,6 +881,8 @@ deactivate ApiGateway
 @enduml
 ```
 
+### UC03 – Provider Registration
+
 ```plantuml
 @startuml
 ' Sequence UC03 - Provider Registration
@@ -1724,6 +996,8 @@ deactivate ApiGateway
 deactivate UI
 @enduml
 ```
+
+### UC04 – Provider Analytics
 
 ```plantuml
 @startuml
@@ -1869,6 +1143,8 @@ Provider -> UI: Exit dashboard or continue browsing
 deactivate UI
 @enduml
 ```
+
+### UC05 – Billing Invoice and Payment
 
 ```plantuml
 @startuml
@@ -2083,6 +1359,8 @@ deactivate UI
 @enduml
 ```
 
+### UC06 – Operator Global Analytics Dashboard
+
 ```plantuml
 @startuml
 ' Sequence UC06 - Operator Global Analytics Dashboard
@@ -2220,107 +1498,850 @@ deactivate UI
 @enduml
 ```
 
+---
+
+## 3. Class Diagrams
+
+### API Class Diagram
+
 ```plantuml
-@startuml
-' ER - Red Provider Adapter DB
-title Red Provider Adapter DB - red_provider_db (Current Implementation)
+@startuml API_ClassDiagram
 
-hide circle
-skinparam linetype ortho
+!define ABSTRACT_COLOR #FFD700
+!define SERVICE_COLOR #87CEEB
+!define ENDPOINT_COLOR #98FB98
 
-entity "normalized_points" as red_normalized_points {
-  * id : CHAR(36) <<PK>>
-  --
-  * point_id : VARCHAR(255) <<UQ>>
-  * provider_name : VARCHAR(100)
-  lon : DECIMAL(12,8)
-  lat : DECIMAL(12,8)
-  status : VARCHAR(50)
-  capacity_kw : DECIMAL(10,2)
-  kwh_price : DECIMAL(10,4)
-  connector : VARCHAR(100)
-  location_name : VARCHAR(255)
-  address : VARCHAR(255)
-  reservation_end_time : VARCHAR(64)
-  raw_payload : LONGTEXT
-  * last_synced_at : DATETIME(6)
-  * created_at : DATETIME(6)
-  * updated_at : DATETIME(6)
+skinparam classBackgroundColor SERVICE_COLOR
+skinparam classBorderColor #333333
+skinparam classArrowColor #333333
+skinparam ArrowColor #333333
+skinparam shadowing false
+skinparam defaultFontName Arial
+
+title Service API Endpoints
+
+package "SaaS System APIs" {
+
+  class "API Gateway" as ApiGateway {
+    --
+    + GET /health
+    + GET /api/status
+  }
+
+  class "Auth Service" as AuthService {
+    --
+    + POST /auth/register(username, password) : AuthResponseDTO
+    + POST /auth/login(credentials) : AuthResponseDTO
+    + POST /auth/logout() : void
+    + GET /auth/validate(token) : UserProfileDTO
+    + POST /auth/refresh(refreshToken) : AuthResponseDTO
+    + GET /auth/profile(userId: integer) : UserProfileDTO
+  }
+
+  class "Provider Management Service" as ProviderMgmtService {
+    --
+    + POST /api/providers/register(data) : ProviderRegDTO
+    + GET /api/providers/list() : List<ProviderProfileDTO>
+    + GET /api/providers/profile(providerId) : ProviderProfileDTO
+    + PATCH /api/providers/profile(providerId, data) : void
+    + GET /api/providers/points(providerId) : List<PointDTO>
+  }
+
+  class "Central Service" as CentralService {
+    --
+    + GET /api/points/all(filters) : List<PointDTO>
+    + GET /api/points/{id}(integer) : PointDTO
+    + POST /api/points/filter(filters) : List<PointDTO>
+    + GET /api/points/status(pointId) : StatusDTO
+    + GET /ui/points(location, bounds) : List<PointDTO>
+    + POST /api/points/subscribe(webhookUrl) : void
+  }
+
+  class "Reservation Service" as ReservationService {
+    --
+    + POST /api/reserve(data) : ReservationResponseDTO
+    + POST /api/reservations(data) : ReservationResponseDTO
+    + GET /api/reservations/{id}(integer) : ReservationResponseDTO
+    + POST /api/reservations/{id}/confirm(userId) : StatusDTO
+    + GET /api/reservations/user(userId) : List<ReservationResponseDTO>
+    + GET /api/reservations/{id}/status(reservationId) : StatusDTO
+  }
+
+  class "Billing Service" as BillingService {
+    --
+    + GET /api/billing/invoices(userId, dateRange) : List<InvoiceDTO>
+    + GET /api/billing/invoices/{id}(invoiceId) : InvoiceDTO
+    + PATCH /api/billing/invoices/{id}/status(invoiceId, status) : void
+    + POST /api/billing/process(invoiceId, paymentMethod) : void
+    + GET /api/billing/summary(userId) : BillingStatDTO
+  }
+
+  class "Payment Service" as PaymentService {
+    --
+    + POST /api/payments/pay(invoiceId, method) : PaymentRedirectDTO
+    + POST /api/payments/verify(transactionId) : PaymentStatusDTO
+    + GET /api/payments/history(userId) : List<PaymentHistoryDTO>
+    + GET /api/payments/{id}/status(paymentId) : PaymentStatusDTO
+  }
+
+  class "Analytics Service" as AnalyticsService {
+    --
+    + POST /api/analytics/track(eventType, data) : void
+    + GET /api/analytics/stats() : AnalyticsStatsDTO
+    + GET /api/analytics/global(timeRange) : GlobalStatsDTO
+    + GET /api/analytics/search(userId) : integer
+    + GET /api/analytics/clicks(userId) : integer
+    + GET /api/analytics/reservations(userId) : integer
+    + GET /api/analytics/export(format, timeRange) : File
+  }
+
+  class "Map Service" as MapService {
+    --
+    + GET /api/map/search(query) : List<PointDTO>
+    + GET /api/map/nearby(lat, lon, radius) : List<PointDTO>
+    + GET /api/map/bounds(northEastLat, bounds) : List<PointDTO>
+    + GET /api/map/location(pointId) : LocationDTO
+    + GET /api/map/distance(from, to) : DistanceDTO
+  }
+
+  class "Provider Adapter RedPlug" as RedAdapter {
+    --
+    + GET /api/adapter/points() : List<PointDTO>
+    + POST /api/adapter/status(pointId) : StatusDTO
+    + POST /api/adapter/reserve(data) : ReservationResponseDTO
+  }
+
+  class "Provider Adapter GreenPlug" as GreenAdapter {
+    --
+    + GET /api/adapter/points() : List<PointDTO>
+    + POST /api/adapter/status(pointId) : StatusDTO
+    + POST /api/adapter/reserve(data) : ReservationResponseDTO
+  }
+
+  class "Provider Adapter BluePlug" as BlueAdapter {
+    --
+    + GET /api/adapter/points() : List<PointDTO>
+    + POST /api/adapter/status(pointId) : StatusDTO
+    + POST /api/adapter/reserve(data) : ReservationResponseDTO
+  }
+
+  class "Message Broker Service" as MessageBrokerService {
+    --
+    + POST /publish(eventType, data) : EventResponseDTO
+    + POST /subscribe(eventType, webhookUrl) : void
+    + GET /diagnostics() : DiagnosticsDTO
+    + POST /retry(eventId) : void
+  }
 }
 
-note right of red_normalized_points
-Loaded by Provider_Adapter_redPlug/db/init.sql.
-No foreign keys are declared in this adapter database.
-end note
+ApiGateway --> AuthService : routes /auth/*
+ApiGateway --> ProviderMgmtService : routes /api/providers*
+ApiGateway --> CentralService : routes /api/points, /ui/*
+ApiGateway --> ReservationService : routes /api/reservations*
+ApiGateway --> BillingService : routes /api/billing*
+ApiGateway --> PaymentService : routes /api/payments*
+ApiGateway --> AnalyticsService : routes /api/analytics*
+ApiGateway --> MapService : routes /api/map*
+
+ReservationService --> RedAdapter : calls adapter endpoints
+ReservationService --> GreenAdapter : calls adapter endpoints
+ReservationService --> BlueAdapter : calls adapter endpoints
+
+CentralService --> MessageBrokerService : publishes events
+ReservationService --> MessageBrokerService : publishes events
+BillingService --> MessageBrokerService : publishes events
+AnalyticsService --> MessageBrokerService : subscribes events
+BillingService --> PaymentService : triggers payment
+
 @enduml
 ```
 
+### Data Structures Class Diagram
+
 ```plantuml
-@startuml
-' ER - Green Provider Adapter DB
-title Green Provider Adapter DB - green_provider_db (Current Implementation)
+@startuml DataStructures_ClassDiagram
 
-hide circle
-skinparam linetype ortho
+skinparam classBackgroundColor #E1F5FF
+skinparam classBorderColor #333333
+skinparam classArrowColor #333333
+skinparam shadowing false
+skinparam defaultFontName Arial
+skinparam packageStyle rectangle
 
-entity "normalized_points" as green_normalized_points {
-  * id : CHAR(36) <<PK>>
-  --
-  * point_id : VARCHAR(255) <<UQ>>
-  * provider_name : VARCHAR(100)
-  lon : DECIMAL(12,8)
-  lat : DECIMAL(12,8)
-  status : VARCHAR(50)
-  capacity_kw : DECIMAL(10,2)
-  kwh_price : DECIMAL(10,4)
-  connector : VARCHAR(100)
-  location_name : VARCHAR(255)
-  address : VARCHAR(255)
-  reservation_end_time : VARCHAR(64)
-  raw_payload : LONGTEXT
-  * last_synced_at : DATETIME(6)
-  * created_at : DATETIME(6)
-  * updated_at : DATETIME(6)
+left to right direction
+title Request/Response Contracts by Service
+
+package "Auth Service" {
+  class RegisterRequest {
+    email
+    password
+    username
+    firstName
+    lastName
+    phone
+  }
+
+  class RegisterResponse {
+    userId
+    email
+    role
+    accessToken
+    refreshToken
+  }
+
+  class LoginRequest {
+    email
+    username
+    password
+  }
+
+  class LoginResponse {
+    userId
+    email
+    role
+    accessToken
+    refreshToken
+  }
+
+  class RefreshRequest {
+    refreshToken
+  }
+
+  class RefreshResponse {
+    accessToken
+    refreshToken
+  }
+
+  class ProfileResponse {
+    userId
+    username
+    email
+    firstName
+    lastName
+    phone
+    googleId
+  }
+
+  class ChangePasswordRequest {
+    currentPassword
+    newPassword
+  }
+
+  class ChangePasswordResponse {
+    message
+  }
 }
 
-note right of green_normalized_points
-Loaded by Provider_Adapter_greenPlug/db/init.sql.
-No foreign keys are declared in this adapter database.
-end note
+package "Provider Management Service" {
+  class ProviderRegistrationRequest {
+    provider_name
+    provider_email
+    company_tin
+    password
+    base_url
+    api_key
+    openapi_url
+    endpoint_list_points
+    endpoint_point_details
+    endpoint_reserve
+    endpoint_reserve_duration
+  }
+
+  class ProviderRegistrationResponse {
+    message
+    provider_id
+    provider_name
+    provider_email
+    company_tin
+    adapter_name
+    integration_status
+    base_url
+    openapi_url
+    status
+    endpoints
+    registered_at
+  }
+
+  class ProviderLoginRequest {
+    provider_name
+    password
+  }
+
+  class ProviderLoginResponse {
+    providerId
+    providerName
+    accessToken
+  }
+
+  class ProviderListResponse {
+    total
+    providers
+  }
+
+  class ProviderDetailResponse {
+    provider
+  }
+
+  class SuspendProviderResponse {
+    message
+    provider_id
+    status
+  }
+}
+
+package "Provider Adapter RedPlug" {
+  class RedPlugAdapter {
+    adapterName
+    baseUrl
+    endpointListPoints
+    endpointPointDetails
+    endpointReserve
+    endpointReserveDuration
+  }
+}
+
+package "Provider Adapter GreenPlug" {
+  class GreenPlugAdapter {
+    adapterName
+    baseUrl
+    endpointListPoints
+    endpointPointDetails
+    endpointReserve
+    endpointReserveDuration
+  }
+}
+
+package "Provider Adapter BluePlug" {
+  class BluePlugAdapter {
+    adapterName
+    baseUrl
+    endpointListPoints
+    endpointPointDetails
+    endpointReserve
+    endpointReserveDuration
+  }
+}
+
+package "Central Service" {
+  class PointReserveRequest {
+    pointId
+    duration
+    minutes
+  }
+
+  class PointReserveResponse {
+    pointId
+    provider
+    status
+    reservationEndTime
+    reservationMinutes
+    timestamp
+    expiresIn
+    message
+  }
+}
+
+package "Reservation Service" {
+  class ReservationCreateRequest {
+    providerName
+    pointId
+    duration
+    minutes
+    userId
+  }
+
+  class ReservationCreateResponse {
+    reservationId
+    providerName
+    pointId
+    status
+    reservationEndTime
+    error
+  }
+
+  class ReservationListResponse {
+    success
+    count
+    reservations
+  }
+
+  class ReservationDetailResponse {
+    success
+    reservation
+  }
+
+  class AdapterReserveRequest {
+    pointId
+    duration
+    userId
+  }
+}
+
+package "Billing Service" {
+  class BillingStatsRequest {
+    providerId
+    billingPeriod
+  }
+
+  class BillingStatsResponse {
+    providerId
+    invoiceId
+    totalAmount
+    status
+  }
+}
+
 @enduml
 ```
 
+---
+
+## 4. Component and Deployment Diagrams
+
+### Component Diagram
+
 ```plantuml
 @startuml
-' ER - Blue Provider Adapter DB
-title Blue Provider Adapter DB - blue_provider_db (Current Implementation)
+title Component Diagram
 
-hide circle
-skinparam linetype ortho
+left to right direction
+skinparam componentStyle rectangle
+skinparam packageStyle rectangle
+skinparam shadowing false
+skinparam defaultFontName Arial
+skinparam defaultTextAlignment center
+skinparam componentFontSize 12
+skinparam noteFontSize 12
 
-entity "normalized_points" as blue_normalized_points {
-  * id : CHAR(36) <<PK>>
-  --
-  * point_id : VARCHAR(255) <<UQ>>
-  * provider_name : VARCHAR(100)
-  lon : DECIMAL(12,8)
-  lat : DECIMAL(12,8)
-  status : VARCHAR(50)
-  capacity_kw : DECIMAL(10,2)
-  kwh_price : DECIMAL(10,4)
-  connector : VARCHAR(100)
-  location_name : VARCHAR(255)
-  address : VARCHAR(255)
-  reservation_end_time : VARCHAR(64)
-  raw_payload : LONGTEXT
-  * last_synced_at : DATETIME(6)
-  * created_at : DATETIME(6)
-  * updated_at : DATETIME(6)
+package "User & External Systems" {
+  component "Frontend\nhttps://github.com/ntua/saas26-11/tree/main/front-end" as Frontend
+  component "External Provider APIs\nRed/Green/Blue" as ExternalProviders #LightBlue
 }
 
-note right of blue_normalized_points
-Loaded by Provider_Adapter_bluePlug/db/init.sql.
-No foreign keys are declared in this adapter database.
-end note
+package "SaaS System" {
+  component "API Gateway\nhttps://github.com/ntua/saas26-11/tree/main/API_Gateway" as ApiGateway
+  component "Auth Service\nhttps://github.com/ntua/saas26-11/tree/main/Auth_Service" as AuthService
+  database "Auth DB\nhttps://github.com/ntua/saas26-11/tree/main/Auth_Service/db" as AuthDB
+  component "Provider Management Service\nhttps://github.com/ntua/saas26-11/tree/main/Provider_Management_Service" as ProviderManagementService
+  database "Provider DB\nhttps://github.com/ntua/saas26-11/tree/main/Provider_Management_Service/db" as ProviderDB
+  component "Central Service\nhttps://github.com/ntua/saas26-11/tree/main/Points_Service" as CentralService
+  database "Central DB\nhttps://github.com/ntua/saas26-11/tree/main/Points_Service/db" as CentralDB
+  component "Reservation Service\nhttps://github.com/ntua/saas26-11/tree/main/Reservation_Service" as ReservationService
+  database "Reservation DB\nhttps://github.com/ntua/saas26-11/tree/main/Reservation_Service/db" as ReservationDB
+  component "Billing Service\nhttps://github.com/ntua/saas26-11/tree/main/Billing_Service" as BillingService
+  database "Billing DB\nhttps://github.com/ntua/saas26-11/tree/main/Billing_Service/db" as BillingDB
+  component "Analytics Service\nhttps://github.com/ntua/saas26-11/tree/main/Analytics_Service" as AnalyticsService
+  database "Analytics DB\nhttps://github.com/ntua/saas26-11/tree/main/Analytics_Service/db" as AnalyticsDB
+  component "Payment Service\nhttps://github.com/ntua/saas26-11/tree/main/Payment_Service" as PaymentService
+  database "Payment DB\nhttps://github.com/ntua/saas26-11/tree/main/Payment_Service/db" as PaymentDB
+  component "Map Service\nhttps://github.com/ntua/saas26-11/tree/main/Map_UI_Service" as MapService
+  component "Provider Adapter RedPlug\nhttps://github.com/ntua/saas26-11/tree/main/Provider_Adapter_redPlug" as RedAdapter
+  database "Red Provider DB\nhttps://github.com/ntua/saas26-11/tree/main/Provider_Adapter_redPlug/db" as RedDB
+  component "Provider Adapter GreenPlug\nhttps://github.com/ntua/saas26-11/tree/main/Provider_Adapter_greenPlug" as GreenAdapter
+  database "Green Provider DB\nhttps://github.com/ntua/saas26-11/tree/main/Provider_Adapter_greenPlug/db" as GreenDB
+  component "Provider Adapter BluePlug\nhttps://github.com/ntua/saas26-11/tree/main/Provider_Adapter_bluePlug" as BlueAdapter
+  database "Blue Provider DB\nhttps://github.com/ntua/saas26-11/tree/main/Provider_Adapter_bluePlug/db" as BlueDB
+  component "Message Broker Service\nhttps://github.com/ntua/saas26-11/tree/main/message_broker" as MessageBroker
+  component "RabbitMQ" as RabbitMQ
+}
+
+Frontend --> ApiGateway : HTTP / REST
+ApiGateway --> AuthService : /auth/*
+ApiGateway --> ProviderManagementService : /api/providers*
+ApiGateway --> CentralService : /api/points, /ui/*
+ApiGateway --> ReservationService : /api/reservations*
+ApiGateway --> BillingService : /api/billing*
+ApiGateway --> AnalyticsService : /api/analytics*
+ApiGateway --> PaymentService : /api/payments*
+ApiGateway --> MapService : /api/map*
+
+AuthService --> AuthDB : user storage
+ProviderManagementService --> ProviderDB : provider storage
+CentralService --> CentralDB : point storage
+ReservationService --> ReservationDB : reservation storage
+BillingService --> BillingDB : billing storage
+AnalyticsService --> AnalyticsDB : analytics storage
+PaymentService --> PaymentDB : payment storage
+
+ReservationService --> RedAdapter : REDPLUG_ADAPTER_URL
+ReservationService --> GreenAdapter : GREENPLUG_ADAPTER_URL
+ReservationService --> BlueAdapter : BLUEPLUG_ADAPTER_URL
+
+RedAdapter --> RedDB : local provider storage
+GreenAdapter --> GreenDB : local provider storage
+BlueAdapter --> BlueDB : local provider storage
+
+RedAdapter --> ExternalProviders : provider API
+GreenAdapter --> ExternalProviders : provider API
+BlueAdapter --> ExternalProviders : provider API
+
+RedAdapter --> CentralService : sync points
+GreenAdapter --> CentralService : sync points
+BlueAdapter --> CentralService : sync points
+
+BillingService --> PaymentService : payment processing
+
+CentralService --> RabbitMQ : publish/subscribe
+ReservationService --> RabbitMQ : publish/subscribe
+BillingService --> RabbitMQ : publish/subscribe
+AnalyticsService --> RabbitMQ : subscribe
+MessageBroker --> RabbitMQ : relay
+
+@enduml
+```
+
+### Deployment Diagram
+
+```plantuml
+@startuml
+title Deployment Diagram
+
+left to right direction
+skinparam componentStyle rectangle
+skinparam packageStyle rectangle
+skinparam shadowing false
+skinparam defaultFontName Arial
+skinparam defaultTextAlignment center
+skinparam componentFontSize 12
+skinparam nodeFontSize 12
+skinparam noteFontSize 12
+
+actor "Browser / User" as Browser
+actor "External Provider APIs\nRed/Green/Blue" as ExternalProviders
+
+package "Docker Host / Docker Compose" {
+  rectangle "Docker Network: saasplug-network" as Network {
+    node "API Gateway Container\nHost Port: 4411" as ApiGatewayContainer {
+      component "API Gateway\nPort: 4411" as ApiGatewayService
+    }
+
+    node "Frontend Service Container\nHost Port: 3311" as FrontendContainer {
+      component "Frontend Service\nHost/Container Port: 3311" as FrontendServiceComponent
+    }
+
+    node "Auth Service Container\nHost Port: 5517" as AuthContainer {
+      component "Auth Service\nPort: 3100" as AuthServiceComponent
+    }
+
+    node "Provider Management Container\nHost Port: 5516" as ProviderManagementContainer {
+      component "Provider Management\nPort: 3101" as ProviderManagementComponent
+    }
+
+    node "Central Service Container\nHost Port: 5512" as CentralContainer {
+      component "Central Service\nPort: 3001" as CentralServiceComponent
+    }
+
+    node "Reservation Service Container\nHost Port: 5513" as ReservationContainer {
+      component "Reservation Service\nPort: 3009" as ReservationServiceComponent
+    }
+
+    node "Billing Service Container\nHost Port: 5514" as BillingContainer {
+      component "Billing Service\nPort: 3103" as BillingServiceComponent
+    }
+
+    node "Payment Service Container\nHost Port: 5515" as PaymentContainer {
+      component "Payment Service\nPort: 3107" as PaymentServiceComponent
+    }
+
+    node "Analytics Service Container\nHost Port: 5518" as AnalyticsContainer {
+      component "Analytics Service\nPort: 3106" as AnalyticsServiceComponent
+    }
+
+    node "Map Service Container\nHost Port: 5519" as MapContainer {
+      component "Map Service\nPort: 3105" as MapServiceComponent
+    }
+
+    node "Provider Adapter RedPlug Container\nHost Port: 5520" as RedAdapterContainer {
+      component "Provider Adapter RedPlug\nPort: 3111" as RedAdapterServiceComponent
+    }
+
+    node "Provider Adapter GreenPlug Container\nHost Port: 5521" as GreenAdapterContainer {
+      component "Provider Adapter GreenPlug\nPort: 3112" as GreenAdapterServiceComponent
+    }
+
+    node "Provider Adapter BluePlug Container\nHost Port: 5522" as BlueAdapterContainer {
+      component "Provider Adapter BluePlug\nPort: 3113" as BlueAdapterServiceComponent
+    }
+
+    node "Message Broker Container\nHost Port: 5511" as MessageBrokerContainer {
+      component "Message Broker\nPort: 3003" as MessageBrokerServiceComponent
+    }
+
+    node "RabbitMQ Container\nHost Ports: 5523/5672, 5524/15672" as RabbitMQContainer {
+      component "RabbitMQ Broker\nPorts: 5672 (AMQP), 15672 (management)" as RabbitMQServiceComponent
+    }
+
+    node "Auth DB Container\nHost Port: 8311" as AuthDbContainer {
+      component "Auth DB\nPort: 3306" as AuthDbService
+    }
+
+    node "Provider DB Container\nHost Port: 7411" as ProviderDbContainer {
+      component "Provider DB\nPort: 3306" as ProviderDbService
+    }
+
+    node "Central DB Container\nHost Port: 6911" as CentralDbContainer {
+      component "Central DB\nPort: 3306" as CentralDbService
+    }
+
+    node "Reservation DB Container\nHost Port: 7311" as ReservationDbContainer {
+      component "Reservation DB\nPort: 3306" as ReservationDbService
+    }
+
+    node "Billing DB Container\nHost Port: 7911" as BillingDbContainer {
+      component "Billing DB\nPort: 3306" as BillingDbService
+    }
+
+    node "Payment DB Container\nHost Port: 8111" as PaymentDbContainer {
+      component "Payment DB\nPort: 3306" as PaymentDbService
+    }
+
+    node "Analytics DB Container\nHost Port: 8511" as AnalyticsDbContainer {
+      component "Analytics DB\nPort: 3306" as AnalyticsDbService
+    }
+
+    node "Red Provider DB Container\nHost Port: 7011" as RedDbContainer {
+      component "Red Provider DB\nPort: 3306" as RedDbService
+    }
+
+    node "Green Provider DB Container\nHost Port: 7111" as GreenDbContainer {
+      component "Green Provider DB\nPort: 3306" as GreenDbService
+    }
+
+    node "Blue Provider DB Container\nHost Port: 7211" as BlueDbContainer {
+      component "Blue Provider DB\nPort: 3306" as BlueDbService
+    }
+  }
+}
+
+@enduml
+```
+
+---
+
+## 5. ER Diagram
+
+```plantuml
+@startuml ER_Diagrams
+
+skinparam packageStyle rectangle
+skinparam classBackgroundColor #F8F9FA
+skinparam classBorderColor #333333
+skinparam classArrowColor #333333
+skinparam shadowing false
+skinparam defaultFontName Arial
+
+left to right direction
+title ER Diagram by Database (based on current schema files)
+
+package "Auth DB" {
+  entity User {
+    * user_id : int
+    --
+    username : varchar
+    email : varchar
+    password_hash : varchar
+    google_id : varchar
+    first_name : varchar
+    last_name : varchar
+    phone : varchar
+    refresh_token_hash : varchar
+    created_at : datetime
+    updated_at : datetime
+  }
+}
+
+package "Provider DB" {
+  entity provider_points {
+    * id : varchar(36)
+    --
+    point_id : varchar(255)
+    lon : decimal
+    lat : decimal
+    status : varchar(50)
+    capacity_kw : int
+    kwh_price : decimal
+    reservation_end_time : timestamp
+    last_synced : timestamp
+    created_at : timestamp
+    updated_at : timestamp
+  }
+
+  entity provider_point_changes {
+    * id : varchar(36)
+    --
+    point_id : varchar(255)
+    field_name : varchar(100)
+    old_value : varchar(255)
+    new_value : varchar(255)
+    changed_at : timestamp
+  }
+
+  provider_points ||--o{ provider_point_changes : point_id
+}
+
+package "Central DB" {
+  entity points {
+    * id : varchar(36)
+    --
+    point_id : varchar(255)
+    provider_name : varchar(50)
+    lon : decimal
+    lat : decimal
+    status : varchar(50)
+    capacity_kw : int
+    kwh_price : decimal
+    connector : varchar(255)
+    location_name : varchar(255)
+    address : varchar
+    reservation_end_time : timestamp
+    last_updated : timestamp
+    created_at : timestamp
+  }
+
+  entity points_history {
+    * id : varchar(36)
+    --
+    point_id : varchar(255)
+    provider_name : varchar(50)
+    old_status : varchar(50)
+    new_status : varchar(50)
+    change_timestamp : timestamp
+  }
+
+  entity provider_points {
+    * id : varchar(36)
+    --
+    provider_name : varchar(50)
+    point_id : varchar(255)
+    imported_at : timestamp
+  }
+
+  points ||--o{ points_history : point_id
+  points ||--o{ provider_points : point_id
+}
+
+package "Reservation DB" {
+  entity reservation_logs {
+    * id : int
+    --
+    reservation_id : varchar(36)
+    provider_id : int
+    provider_name : varchar(50)
+    point_id : varchar(100)
+    duration : int
+    user_id : varchar(36)
+    status : varchar(50)
+    reservation_details : json
+    created_at : timestamp
+    updated_at : timestamp
+  }
+
+  entity reservation_statistics {
+    * id : int
+    --
+    date_key : date
+    provider_id : int
+    provider_name : varchar(50)
+    total_reservations : int
+    successful_reservations : int
+    failed_reservations : int
+    total_duration_minutes : int
+    average_duration_minutes : int
+    created_at : timestamp
+    updated_at : timestamp
+  }
+}
+
+package "Billing DB" {
+  entity invoices {
+    * invoice_id : int
+    --
+    provider_id : int
+    billing_period_start : date
+    billing_period_end : date
+    successful_reservations_count : int
+    monthly_fee : decimal
+    reservation_price : decimal
+    total_amount : decimal
+    tax_amount : decimal
+    grand_total : decimal
+    status : varchar(50)
+    issued_at : timestamp
+    due_date : date
+    paid_at : timestamp
+  }
+
+  entity invoice_line_items {
+    * line_id : int
+    --
+    invoice_id : int
+    description : varchar(255)
+    quantity : int
+    unit_price : decimal
+    line_total : decimal
+  }
+
+  entity provider_pricing {
+    * provider_id : int
+    --
+    monthly_fee : decimal
+    reservation_price : decimal
+    created_at : timestamp
+    updated_at : timestamp
+  }
+
+  entity current_usage {
+    * provider_id : int
+    --
+    billing_period : date
+    successful_reservations : int
+    monthly_fee : decimal
+    reservation_price : decimal
+    estimated_amount : decimal
+    updated_at : timestamp
+  }
+
+  entity payment_history {
+    * payment_id : int
+    --
+    invoice_id : int
+    provider_id : int
+    amount : decimal
+    payment_method : varchar(50)
+    reference : varchar(255)
+    status : varchar(50)
+    notes : varchar(500)
+    paid_at : timestamp
+  }
+
+  invoices ||--o{ invoice_line_items : invoice_id
+  invoices ||--o{ payment_history : invoice_id
+  provider_pricing ||--o{ current_usage : provider_id
+}
+
+package "Payment DB" {
+  entity Payment {
+    * payment_id : int
+    --
+    invoice_id : int
+    provider_id : int
+    amount : decimal
+    payment_method : varchar(100)
+    reference : varchar(255)
+    notes : varchar(500)
+    status : varchar(255)
+    paid_at : timestamp
+  }
+}
+
+package "Analytics DB" {
+  entity user_registrations {
+    * id : int
+    --
+    userId : varchar(255)
+    createdAt : timestamp
+  }
+}
+
 @enduml
 ```
