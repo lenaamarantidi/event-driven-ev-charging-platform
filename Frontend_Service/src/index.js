@@ -9,6 +9,7 @@ const path = require('path');
 const fs = require('fs');
 const yaml = require('yaml');
 const { getAllPointsFromCentral } = require('./map_ui');
+const { reservePoint } = require('./reserve_ui');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -94,6 +95,54 @@ app.get('/api/hosts', (req, res) => {
         return [hostname, ip];
       })
     )
+  });
+});
+
+// API endpoint to reserve a point (calls reserve_ui.reservePoint)
+app.post('/api/reserve', async (req, res) => {
+  try {
+    const { pointId, minutes } = req.body;
+    
+    if (!pointId) {
+      return res.status(400).json({ error: 'pointId is required' });
+    }
+
+    console.log('[POST /api/reserve] Reserving point_id:', pointId, 'for', minutes || 1, 'minutes');
+    
+    const options = {};
+    if (minutes) {
+      options.minutes = minutes;
+    } else {
+      options.minutes = 1; // Default to 1 minute
+    }
+    
+    // Call the sync function reservePoint from reserve_ui.js
+    const result = await reservePoint(pointId, options);
+    
+    console.log('[POST /api/reserve] Reservation successful for point:', pointId);
+    res.json({
+      success: true,
+      pointId,
+      minutes: options.minutes,
+      result
+    });
+  } catch (err) {
+    const status = err.response?.status || 500;
+    console.error('[POST /api/reserve] Reservation error:', err.message);
+    res.status(status).json({
+      error: err.message,
+      details: err.response?.data?.error || err.message
+    });
+  }
+});
+
+// API endpoint to return server configuration from environment variables
+app.get('/api/config', (req, res) => {
+  res.json({
+    POINTS_CENTRAL_PORT: process.env.POINTS_CENTRAL_PORT || 3004,
+    POINTS_RED_PORT: process.env.POINTS_RED_PORT || 3002,
+    POINTS_GREEN_PORT: process.env.POINTS_GREEN_PORT || 3001,
+    POINTS_BLUE_PORT: process.env.POINTS_BLUE_PORT || 3003
   });
 });
 
