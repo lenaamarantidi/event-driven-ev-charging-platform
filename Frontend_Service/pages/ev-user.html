@@ -243,6 +243,37 @@
       padding: 20px 0;
       font-size: 1.1rem;
     }
+    
+    .search-result-item {
+      padding: 12px 16px;
+      border-bottom: 1px solid #eee;
+      cursor: pointer;
+      font-size: 0.95rem;
+    }
+    
+    .search-result-item:hover {
+      background-color: #f5f5f5;
+    }
+    
+    .search-result-distance {
+      font-size: 0.85rem;
+      color: #999;
+      margin-top: 4px;
+    }
+    
+    #search-results-dropdown {
+      position: absolute;
+      top: 100%;
+      left: 0;
+      right: 0;
+      background: white;
+      border: 1px solid #ddd;
+      border-radius: 4px;
+      max-height: 300px;
+      overflow-y: auto;
+      z-index: 100;
+      box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+    }
 
     /* Modal overlay */
     .modal-overlay {
@@ -502,13 +533,23 @@
     </div>
 
 
+    <!-- Address Search Section -->
+    <div style="margin-bottom: 12px; background: white; border-radius: 8px; padding: 12px; box-shadow: 0 2px 8px rgba(0,0,0,0.1);">
+      <div style="display: flex; gap: 10px; align-items: center; margin-bottom: 8px;">
+        <label style="font-weight: 600; white-space: nowrap;">Nearby (Address):</label>
+        <div style="position: relative; display: flex; gap: 8px; flex: 1;">
+          <input type="text" id="address-search" placeholder="Enter address or location" style="height: 50px; font-size: 16px; flex: 1.5; padding: 10px 12px; border: 1px solid #999; border-radius: 4px;" oninput="searchAddressRealtime()">
+          <input type="number" id="search-radius" placeholder="5" min="1" max="50" value="5" style="height: 50px; width: 90px; font-size: 14px; padding: 8px; border: 1px solid #999; border-radius: 4px;">
+          <button onclick="searchByAddress()" style="height: 50px; padding: 0 16px; font-size: 14px; font-weight: 600; background: #667eea; color: white; border: none; border-radius: 4px; cursor: pointer; white-space: nowrap;">Search Nearby</button>
+        </div>
+      </div>
+      <div id="search-results-dropdown" style="display: none; background: white; border: 1px solid #ddd; border-radius: 4px; max-height: 250px; overflow-y: auto; margin-left: 120px; box-shadow: 0 4px 8px rgba(0,0,0,0.1);"></div>
+    </div>
+
     <div class="filters-group">
-      <!-- Address/Location Search with Radius -->
-      <div class="filter-group">
-        <label>Nearby (Address):</label>
-        <input type="text" id="address-search" placeholder="Enter address or location" style="flex: 1;">
-        <input type="number" id="search-radius" placeholder="Radius (km)" min="0.1" step="0.1" value="5" style="width: 120px;">
-        <button onclick="searchByAddress()">Search Nearby</button>
+      <!-- Filters Group (kept for other filters) -->
+      <div class="filter-group" style="display: none;">
+        <!-- Placeholder to maintain structure -->
       </div>
 
     <div class="filters-group">
@@ -517,10 +558,14 @@
         <label for="connector-filter">Connector:</label>
         <select id="connector-filter">
           <option value="">All</option>
-          <option value="Type 2">Type 2</option>
-          <option value="Type 3">Type 3</option>
-          <option value="CHAdeMO">CHAdeMO</option>
-          <option value="CCS2">CCS2</option>
+          <option value="1">Type 1 (J1772)</option>
+          <option value="2">Type 2 (Mennekes)</option>
+          <option value="3">Type 3</option>
+          <option value="4">CHAdeMO</option>
+          <option value="5">CCS1 (Combo 1)</option>
+          <option value="6">CCS2 (Combo 2)</option>
+          <option value="7">Tesla</option>
+          <option value="20">Type 2 Schuko</option>
         </select>
       </div>
 
@@ -610,14 +655,43 @@
         <span class="point-detail-value" id="point-price">-</span>
       </div>
 
-      <button class="reserve-button" id="reserve-button" disabled>
-        Reserve (Coming Soon)
+      <button class="reserve-button" id="reserve-button" disabled onclick="handleReserveClick()">
+        Reserve Now
       </button>
     </div>
   </div>
   
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
   <script>
+    // Get server configuration from environment variables
+    let CENTRAL_PORT = null;
+    let RED_PORT = null;
+    let GREEN_PORT = null;
+    let BLUE_PORT = null;
+    
+    async function loadServerConfig() {
+      try {
+        const response = await fetch('/api/config');
+        if (response.ok) {
+          const data = await response.json();
+          CENTRAL_PORT = data.POINTS_CENTRAL_PORT;
+          RED_PORT = data.POINTS_RED_PORT;
+          GREEN_PORT = data.POINTS_GREEN_PORT;
+          BLUE_PORT = data.POINTS_BLUE_PORT;
+          console.log('[loadServerConfig] Loaded config:', { CENTRAL_PORT, RED_PORT, GREEN_PORT, BLUE_PORT });
+        }
+      } catch (err) {
+        console.warn('[loadServerConfig] Failed to load config, ports will not work. Restart all services');
+        CENTRAL_PORT = -100;
+        RED_PORT = -100;
+        GREEN_PORT = -100;
+        BLUE_PORT = -100;
+      }
+    }
+    
+    // Load config immediately (before DOMContentLoaded)
+    loadServerConfig();
+
     // Color mapping for different providers (by provider_name)
     const providerColors = {
       redPlug: '#FF4444',
@@ -634,6 +708,60 @@
     let allPoints = []; // Store all loaded points
     let currentFilter = 'all'; // Track current filter status
     let currentProvider = null; // Track current provider
+
+    // Handle reserve button click
+    // Direct call to reservePoint function (imported from reserve_ui.js on backend)
+    async function reservePoint(pointId, options = {}) {
+      try {
+        const minutes = options.minutes || 1;
+        console.log('[reservePoint] Reserving point_id:', pointId, 'for', minutes, 'minute(s)');
+        
+        // Call backend /api/reserve endpoint which internally calls reservePoint from reserve_ui.js
+        const response = await fetch('/api/reserve', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ 
+            pointId: pointId, 
+            minutes: minutes
+          })
+        });
+        
+        if (!response.ok) {
+          const error = await response.json();
+          throw new Error(error.error || `HTTP ${response.status}`);
+        }
+        
+        const result = await response.json();
+        console.log('[reservePoint] Reservation successful:', result);
+        
+        // Log activity
+        addActivity('successful', `Reserved ${currentPointData.location_name || 'Unknown'} for ${minutes} minute(s)`);
+        
+        // Show success message
+        alert(`Successfully reserved for ${minutes} minute(s)!`);
+        
+        // Close modal
+        closePointModal();
+        
+        return result;
+      } catch (err) {
+        console.error('[reservePoint] Reservation failed:', err.message);
+        addActivity('attempted', `Failed to reserve: ${err.message}`);
+        alert(`Reservation failed: ${err.message}`);
+        throw err;
+      }
+    }
+
+    // Handle reserve button click
+    function handleReserveClick() {
+      if (!currentPointData || !currentPointData.point_id) {
+        alert('Point data is missing');
+        return;
+      }
+      
+      console.log('[handleReserveClick] Calling reservePoint with point_id:', currentPointData.point_id);
+      reservePoint(currentPointData.point_id, { minutes: 1 });
+    }
 
     // Map initialization
     let map;
@@ -997,10 +1125,135 @@
       }
     }
 
-        // Search for charging points near an address
+    // Display search results in dropdown
+    function displaySearchResults(results, radius) {
+      const dropdown = document.getElementById('search-results-dropdown');
+      if (!dropdown) {
+        console.error('[displaySearchResults] Dropdown element not found');
+        return;
+      }
+      
+      dropdown.innerHTML = '';
+      
+      if (results.length === 0) {
+        const noResults = document.createElement('div');
+        noResults.style.cssText = 'padding: 12px 16px; color: #999; text-align: center;';
+        noResults.textContent = 'No matching locations found';
+        dropdown.appendChild(noResults);
+        dropdown.style.display = 'block';
+        return;
+      }
+      
+      results.forEach((result, index) => {
+        const item = document.createElement('div');
+        item.className = 'search-result-item';
+        
+        // Extract main location name and type
+        const displayName = result.display_name || '';
+        const parts = displayName.split(',');
+        const mainName = parts[0];
+        const fullName = displayName;
+        
+        item.innerHTML = `
+          <div style="font-weight: 600; color: #333;">${mainName}</div>
+          <div style="font-size: 0.85rem; color: #666; margin-top: 2px;">${fullName}</div>
+        `;
+        item.style.cssText = 'padding: 12px 16px; border-bottom: 1px solid #eee; cursor: pointer; transition: background 0.2s;';
+        item.onmouseover = () => item.style.backgroundColor = '#f8f9fa';
+        item.onmouseout = () => item.style.backgroundColor = 'transparent';
+        item.onclick = () => {
+          selectSearchResult(result, radius);
+          dropdown.style.display = 'none';
+        };
+        dropdown.appendChild(item);
+      });
+      
+      dropdown.style.display = 'block';
+    }
+    
+    // Select a search result and search nearby points
+    async function selectSearchResult(result, radius) {
+      console.log('[selectSearchResult] Selected:', result.display_name);
+      
+      const lat = result.lat;
+      const lon = result.lon;
+      
+      // Update the address input
+      document.getElementById('address-search').value = result.display_name;
+      
+      try {
+        // Fetch nearby points
+        const response = await fetch(`/api/points?lat=${lat}&lon=${lon}&radius=${radius}`);
+        if (!response.ok) throw new Error('Failed to fetch nearby points');
+        
+        const data = await response.json();
+        console.log(`[selectSearchResult] Found ${data.count} points within ${radius}km`);
+        
+        allPoints = data.points || [];
+        updateStatsDisplay(calculateStats(allPoints));
+        
+        clearMarkers();
+        allPoints.forEach((point) => {
+          if (point.lat && point.lon) {
+            const providerKey = point.provider_name || currentProvider;
+            addMarker(point.lat, point.lon, point, providerKey);
+          }
+        });
+        
+        // Fit map to results
+        if (markers.length > 0) {
+          const group = new L.featureGroup(markers);
+          map.fitBounds(group.getBounds().pad(0.1));
+        }
+        
+      } catch (err) {
+        console.error('[selectSearchResult] Error:', err.message);
+        alert('Error fetching nearby points: ' + err.message);
+      }
+    }
+
+    // Search addresses as user types (debounced)
+    let searchTimeout;
+    async function searchAddressRealtime() {
+      const address = document.getElementById('address-search').value.trim();
+      const dropdown = document.getElementById('search-results-dropdown');
+      
+      // Clear previous timeout
+      clearTimeout(searchTimeout);
+      
+      if (address.length < 2) {
+        dropdown.style.display = 'none';
+        return;
+      }
+      
+      // Debounce search - wait 300ms before searching
+      searchTimeout = setTimeout(async () => {
+        try {
+          console.log('[searchAddressRealtime] Searching for:', address);
+          const response = await fetch(
+            `https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(address)}&limit=10`
+          );
+          
+          if (!response.ok) throw new Error('Search failed');
+          
+          const results = await response.json();
+          console.log('[searchAddressRealtime] Found', results.length, 'results');
+          
+          const radius = document.getElementById('search-radius').value || 5;
+          // Show top 5 results
+          displaySearchResults(results.slice(0, 5), radius);
+        } catch (err) {
+          console.error('[searchAddressRealtime] Error:', err.message);
+          dropdown.style.display = 'none';
+        }
+      }, 300);
+    }
+    
+        // Search for charging points near an address with dropdown results
     async function searchByAddress() {
       const address = document.getElementById('address-search').value.trim();
       const radius = document.getElementById('search-radius').value || 5;
+      const resultsDropdown = document.getElementById('search-results-dropdown');
 
       if (!address) {
         alert('Please enter an address or location');
@@ -1020,9 +1273,14 @@
         const results = await response.json();
         if (!results || results.length === 0) {
           alert('Address not found. Please try a different search term.');
+          resultsDropdown.style.display = 'none';
           return;
         }
 
+        // Show top 5 results in dropdown
+        displaySearchResults(results.slice(0, 5), radius);
+        
+        // Use first result
         const result = results[0];
         const lat = parseFloat(result.lat);
         const lon = parseFloat(result.lon);
@@ -1090,19 +1348,29 @@
       const priceMin = document.getElementById('price-min').value;
       const priceMax = document.getElementById('price-max').value;
 
+      console.log('[applyFilters] Input values:', { connector, powerMin, powerMax, priceMin, priceMax });
+      console.log('[applyFilters] Total points available:', allPoints.length);
+
       clearMarkers();
       let filteredPoints = [...allPoints];
 
-// Filter by connector type
-      if (connector) {
+      // Filter by connector type
+      if (connector && connector.trim() !== '') {
+        const beforeCount = filteredPoints.length;
         filteredPoints = filteredPoints.filter(point => {
-          const pointConnector = String(point.connector || '').toLowerCase();
-          return pointConnector === connector.toLowerCase();
+          const pointConnector = String(point.connector || '').trim();
+          const matches = pointConnector === connector;
+          if (!matches) {
+            console.log(`[connector debug] Point connector "${pointConnector}" !== selected "${connector}"`);
+          }
+          return matches;
         });
+        console.log(`[applyFilters] After connector filter: ${beforeCount} → ${filteredPoints.length}`);
       }
 
       // Filter by power range
       if (powerMin || powerMax) {
+        const beforeCount = filteredPoints.length;
         filteredPoints = filteredPoints.filter(point => {
           const capacity = point.capacity_kw ? Number(point.capacity_kw) : null;
           if (capacity === null) return false;
@@ -1110,10 +1378,12 @@
           if (powerMax && capacity > Number(powerMax)) return false;
           return true;
         });
+        console.log(`[applyFilters] After power filter (${powerMin}-${powerMax}): ${beforeCount} → ${filteredPoints.length}`);
       }
 
       // Filter by price range
       if (priceMin || priceMax) {
+        const beforeCount = filteredPoints.length;
         filteredPoints = filteredPoints.filter(point => {
           const price = point.kwh_price ? Number(point.kwh_price) : null;
           if (price === null) return true; // Include points with no price
@@ -1121,6 +1391,7 @@
           if (priceMax && price > Number(priceMax)) return false;
           return true;
         });
+        console.log(`[applyFilters] After price filter (${priceMin}-${priceMax}): ${beforeCount} → ${filteredPoints.length}`);
       }
 
       // Add filtered markers
@@ -1135,11 +1406,13 @@
       if (markers.length > 0) {
         const group = new L.featureGroup(markers);
         map.fitBounds(group.getBounds().pad(0.1));
+        console.log(`[applyFilters] Fitted map to ${markers.length} markers`);
       } else {
         alert('No points match the selected filters');
+        console.log(`[applyFilters] No points found matching filters`);
       }
 
-      console.log(`Applied filters: connector=${connector}, power=${powerMin}-${powerMax}, price=${priceMin}-${priceMax}. Found ${filteredPoints.length} points`);
+      console.log(`[applyFilters] Final result: ${filteredPoints.length} points displayed`);
     }
 
     // Reset all filters
@@ -1189,5 +1462,6 @@ document.getElementById('connector-filter').value = '';
       });
     });
   </script>
+</div>
 </body>
 </html>
