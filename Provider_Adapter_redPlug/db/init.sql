@@ -1,0 +1,20 @@
+CREATE TABLE IF NOT EXISTS normalized_points (
+  id CHAR(36) NOT NULL,
+  point_id VARCHAR(255) NOT NULL,
+  provider_name VARCHAR(100) NOT NULL,
+  lon DECIMAL(12,8) NULL,
+  lat DECIMAL(12,8) NULL,
+  status VARCHAR(50) NULL,
+  capacity_kw DECIMAL(10,2) NULL,
+  kwh_price DECIMAL(10,4) NULL,
+  connector VARCHAR(100) NULL,
+  location_name VARCHAR(255) NULL,
+  address VARCHAR(255) NULL,
+  reservation_end_time VARCHAR(64) NULL,
+  raw_payload LONGTEXT NULL,
+  last_synced_at DATETIME(6) NOT NULL,
+  created_at DATETIME(6) NOT NULL,
+  updated_at DATETIME(6) NOT NULL,
+  PRIMARY KEY (id),
+  UNIQUE KEY uniq_normalized_points_point_id (point_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
