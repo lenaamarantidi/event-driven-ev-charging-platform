@@ -11,7 +11,7 @@ skinparam arrowColor #34495E
 start
 :Open EV User Map Dashboard;
 
-|EV User UI|
+|Frontend|
 :Initialize Map Interface;
 :Request Device Location;
 
@@ -22,67 +22,39 @@ else (No)
   :Display Location Warning;
 endif
 
-fork
-  :Establish Real-Time Event Stream;
-fork again
-  :Prepare Default Search Filters;
-  :Request Charging Points Data;
+:Request Charging Points Data;
 
-  |API Gateway|
-  :Route Points Request;
+|API Gateway|
+:Route Request to Central Service;
 
-  |Central Service|
-  :Validate & Process Query Parameters;
-  
-  |Central DB|
-  :Retrieve Matching Charging Points;
+|Central Service|
+:Validate & Process Query Parameters;
 
-  |Central Service|
-  :Return Charging Points List;
+|Central DB|
+:Retrieve Matching Charging Points;
 
-  |EV User UI|
-  if (Data Retrieval Successful?) then (Yes)
-    :Normalize Point Data;
-    :Calculate Distances & Sort;
-  else (No)
-    :Clear Map Markers;
-    :Display Empty/Error State;
-  endif
-end fork
+|Central Service|
+:Return Charging Points List;
 
-|External Map Service|
-:Provide Geographical Map Tiles;
+|Frontend|
+if (Data Retrieval Successful?) then (Yes)
+  :Normalize Point Data;
+  :Calculate Distances & Sort;
+else (No)
+  :Clear Map Markers;
+  :Display Empty/Error State;
+endif
 
-|EV User UI|
 :Render Interactive Map;
 :Render Clustered Point Markers;
-
-|EV User|
-if (User Searches Location?) then (Yes)
-  :Enter Location Query;
-  
-  |EV User UI|
-  :Request Geocoding;
-  
-  |External Geocoding Service|
-  if (Location Found?) then (Yes)
-    :Return Coordinates;
-    |EV User UI|
-    :Update Map Center;
-    :Refresh Charging Points Data;
-  else (No)
-    :Return Empty Result;
-    |EV User UI|
-    :Display "Location Not Found" Message;
-  endif
-else (No)
-endif
+:Display Charging Points on Map;
 
 |EV User|
 if (User Adjusts Filters?) then (Yes)
   :Update Filter Selections;
-  |EV User UI|
+  |Frontend|
   :Refresh Charging Points Data;
+  :Update Map Display;
 else (No)
 endif
 
@@ -90,21 +62,22 @@ endif
 if (User Selects a Charging Point?) then (Yes)
   :Click on Marker or List Item;
 
-  |EV User UI|
+  |Frontend|
   if (Full Details Available Locally?) then (Yes)
+    :Display Charging Point Info Panel;
   else (No)
     :Request Detailed Point Information;
     |API Gateway|
     :Route Details Request;
-    |EV User UI|
-    :Process Received Details;
+    |Central Service|
+    :Retrieve Point Details;
+    |Frontend|
+    :Display Charging Point Info Panel;
   endif
-  
-  :Display Charging Point Info Panel;
   
   |EV User|
   if (User Requests Navigation?) then (Yes)
-    |EV User UI|
+    |Frontend|
     :Redirect to External Navigation App;
     stop
   else (No)
