@@ -1,6 +1,8 @@
 const express = require('express');
 const axios = require('axios');
+const mysql = require('mysql2/promise');
 const amqp = require('amqplib');
+const { randomUUID } = require('crypto');
 require('dotenv').config();
 
 const app = express();
@@ -10,15 +12,45 @@ const PORT = Number(process.env.PORT || 3112);
 
 const BASE_URL = process.env.GREENPLUG_API_URL || 'https://davinci.softlab.ntua.gr/saas26/greenPlug/api';
 const API_KEY = process.env.GREENPLUG_API_KEY || 'greenplug-key-123';
-const POINTS_SERVICE_URL = process.env.POINTS_SERVICE_URL || 'http://central-service:3001';
-const ADAPTER_SYNC_INTERVAL_MS = Number(process.env.ADAPTER_SYNC_INTERVAL_MS || 86400000);
-const SYNC_INGEST_TOKEN = process.env.SYNC_INGEST_TOKEN || '';
 const RABBITMQ_URL = process.env.RABBITMQ_URL || 'amqp://guest:guest@rabbitmq:5672';
 const ADAPTER_SYNC_REQUEST_EXCHANGE = process.env.ADAPTER_SYNC_REQUEST_EXCHANGE || 'adapter.sync.requests';
 const ADAPTER_SYNC_ROUTING_KEY = 'adapter.greenPlug.fetch_points';
 const ADAPTER_SYNC_QUEUE = process.env.ADAPTER_SYNC_QUEUE || 'adapter.greenPlug.sync.requests';
 const ADAPTER_RESERVE_ROUTING_KEY = 'adapter.greenPlug.reserve';
 const ADAPTER_RESERVE_QUEUE = process.env.ADAPTER_RESERVE_QUEUE || 'adapter.greenPlug.reserve.requests';
+const DB_NAME = process.env.DB_NAME || 'green_provider_db';
+const dbPool = mysql.createPool({
+  host: process.env.DB_HOST || 'mariadb-green',
+  port: process.env.DB_PORT ? Number(process.env.DB_PORT) : 3306,
+  user: process.env.DB_USER || 'green_user',
+  password: process.env.DB_PASSWORD || 'green_pass',
+  database: DB_NAME,
+  waitForConnections: true,
+  connectionLimit: 10,
+  queueLimit: 0,
+});
+const NORMALIZED_POINTS_TABLE_SQL = `
+  CREATE TABLE IF NOT EXISTS normalized_points (
+    id CHAR(36) NOT NULL,
+    point_id VARCHAR(255) NOT NULL,
+    provider_name VARCHAR(100) NOT NULL,
+    lon DECIMAL(12,8) NULL,
+    lat DECIMAL(12,8) NULL,
+    status VARCHAR(50) NULL,
+    capacity_kw DECIMAL(10,2) NULL,
+    kwh_price DECIMAL(10,4) NULL,
+    connector VARCHAR(100) NULL,
+    location_name VARCHAR(255) NULL,
+    address VARCHAR(255) NULL,
+    reservation_end_time VARCHAR(64) NULL,
+    raw_payload LONGTEXT NULL,
+    last_synced_at DATETIME(6) NOT NULL,
+    created_at DATETIME(6) NOT NULL,
+    updated_at DATETIME(6) NOT NULL,
+    PRIMARY KEY (id),
+    UNIQUE KEY uniq_normalized_points_point_id (point_id)
+  ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+`;
 
 function maskAuthHeader(value) {
   if (!value) return '';
@@ -39,6 +71,139 @@ function logProviderResponseError(err, { method, url, pointId }) {
   const status = err?.response?.status;
   const body = err?.response?.data;
   console.error(`[greenPlug] Provider error method=${String(method).toUpperCase()} url=${url} pointId=${pointId || ''} status=${status || 'n/a'} body=${typeof body === 'string' ? body : JSON.stringify(body || {})}`);
+}
+
+function safeJsonParse(value) {
+  if (!value) return null;
+  try {
+    return JSON.parse(value);
+  } catch {
+    return value;
+  }
+}
+
+function toNumberOrNull(value) {
+  if (value === null || value === undefined || value === '') return null;
+  const numericValue = Number(value);
+  return Number.isFinite(numericValue) ? numericValue : null;
+}
+
+function normalizePointRow(point) {
+  return {
+    pointId: String(point.pointId ?? point.id ?? point.uid ?? point.chargerId ?? point.pointid ?? ''),
+    providerName: String(point.providerName ?? point.provider_name ?? 'greenPlug'),
+    lon: point.lon ?? point.lng ?? point.geo?.[1] ?? point.coords?.long ?? null,
+    lat: point.lat ?? point.geo?.[0] ?? point.coords?.lat ?? null,
+    capacityKw: point.capacityKw ?? point.capacity_kw ?? point.cap ?? point.capacity ?? null,
+    kwhPrice: point.kwhPrice ?? point.kwh_price ?? point.pricePerKwh ?? point.kwhRateEur ?? point.price ?? null,
+    status: point.status ?? point.state ?? point.currentStatus ?? null,
+    locationName: point.locationName ?? point.location_name ?? null,
+    connector: point.connector ?? point.connectorType ?? null,
+    address: point.address ?? null,
+    reservationEndTime: point.reservationEndTime ?? point.reservation_end_time ?? point.reservationEnd ?? point.reservedUntil ?? null,
+    raw: point.raw ?? point,
+  };
+}
+
+function normalizeDbRow(row) {
+  return {
+    pointId: String(row.point_id || ''),
+    providerName: String(row.provider_name || 'greenPlug'),
+    lon: toNumberOrNull(row.lon),
+    lat: toNumberOrNull(row.lat),
+    capacityKw: toNumberOrNull(row.capacity_kw),
+    kwhPrice: toNumberOrNull(row.kwh_price),
+    status: row.status ?? null,
+    locationName: row.location_name ?? null,
+    connector: row.connector ?? null,
+    address: row.address ?? null,
+    reservationEndTime: row.reservation_end_time ?? null,
+    raw: safeJsonParse(row.raw_payload),
+    lastSyncedAt: row.last_synced_at,
+  };
+}
+
+async function initializeDatabase() {
+  const maxAttempts = Number(process.env.DB_WAIT_ATTEMPTS || 10);
+  const delayMs = Number(process.env.DB_WAIT_DELAY_MS || 1000);
+
+  let lastErr;
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    try {
+      await dbPool.query('SELECT 1');
+      await dbPool.query(NORMALIZED_POINTS_TABLE_SQL);
+      console.log(`✓ greenPlug adapter database ready (${DB_NAME})`);
+      return;
+    } catch (err) {
+      lastErr = err;
+      console.warn(`[greenPlug] Waiting for adapter database (${attempt}/${maxAttempts}):`, err.message);
+      await new Promise((resolve) => setTimeout(resolve, delayMs));
+    }
+  }
+
+  throw lastErr;
+}
+
+async function persistNormalizedPoints(points, trigger) {
+  const connection = await dbPool.getConnection();
+
+  try {
+    await connection.beginTransaction();
+    await connection.query('DELETE FROM normalized_points');
+
+    const timestamp = new Date();
+    for (const point of points) {
+      const normalized = normalizePointRow(point);
+      if (!normalized.pointId) continue;
+
+      await connection.query(
+        `INSERT INTO normalized_points
+          (id, point_id, provider_name, lon, lat, status, capacity_kw, kwh_price, connector, location_name, address, reservation_end_time, raw_payload, last_synced_at, created_at, updated_at)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)` ,
+        [
+          randomUUID(),
+          normalized.pointId,
+          normalized.providerName,
+          normalized.lon,
+          normalized.lat,
+          normalized.status,
+          normalized.capacityKw,
+          normalized.kwhPrice,
+          normalized.connector,
+          normalized.locationName,
+          normalized.address,
+          normalized.reservationEndTime,
+          JSON.stringify({ ...normalized, trigger }),
+          timestamp,
+          timestamp,
+          timestamp,
+        ]
+      );
+    }
+
+    await connection.commit();
+  } catch (err) {
+    await connection.rollback();
+    throw err;
+  } finally {
+    connection.release();
+  }
+}
+
+async function loadNormalizedPointsFromDb() {
+  const [rows] = await dbPool.query('SELECT * FROM normalized_points ORDER BY provider_name, point_id');
+  return rows.map(normalizeDbRow);
+}
+
+async function fetchPointsFromProvider() {
+  const data = await proxyRequest(`${BASE_URL}/chargingPoints`, 'get', null, { op: 'list_points' });
+  return Array.isArray(data) ? data.map(normalizePointForCentral) : [];
+}
+
+async function refreshNormalizedPoints(trigger = 'interval') {
+  const points = await fetchPointsFromProvider();
+  await persistNormalizedPoints(points, trigger);
+  return loadNormalizedPointsFromDb();
 }
 
 async function proxyRequest(url, method = 'get', data = null, meta = {}) {
@@ -113,7 +278,7 @@ async function reservePoint(pointId, duration, userId) {
 }
 
 async function syncToPointsService(trigger = 'interval') {
-  const points = await fetchNormalizedPoints();
+  const points = await refreshNormalizedPoints(trigger);
   const response = {
     provider: 'greenPlug',
     trigger,
@@ -138,7 +303,7 @@ async function startBrokerSyncConsumer() {
     if (!msg) return;
 
     try {
-      const points = await fetchNormalizedPoints();
+      const points = await refreshNormalizedPoints('broker-sync');
       const payload = {
         provider: 'greenPlug',
         points,
@@ -242,9 +407,19 @@ app.get('/health', (req, res) => res.json({ status: 'ok', provider: 'greenPlug' 
 
 app.get('/api/points', async (req, res) => {
   try {
-    const points = await fetchNormalizedPoints();
+    const points = await refreshNormalizedPoints('api');
     res.json({ points });
-  } catch (err) { res.status(500).json({ error: err.message }); }
+  } catch (err) {
+    try {
+      const cachedPoints = await loadNormalizedPointsFromDb();
+      if (cachedPoints.length > 0) {
+        return res.json({ points: cachedPoints, cached: true });
+      }
+    } catch {
+      // Fall through to error response.
+    }
+    res.status(500).json({ error: err.message });
+  }
 });
 
 app.get('/api/points/:pointId', async (req, res) => {
@@ -271,12 +446,21 @@ app.post('/internal/sync-now', async (req, res) => {
   }
 });
 
-app.listen(PORT, () => {
-  console.log(`✓ greenPlug adapter listening on ${PORT}`);
-  console.log(`[greenPlug] Manual sync endpoint: POST /internal/sync-now`);
-  console.log(`[greenPlug] Query endpoints: GET /api/points, GET /api/points/:pointId`);
-  console.log(`[greenPlug] WARNING: Automatic sync disabled - Points Service orchestrates sync schedule`);
-  startBrokerSyncConsumerWithRetry().catch((err) => {
-    console.error('[greenPlug] Failed to initialize broker sync consumer:', err.message);
+async function startServer() {
+  await initializeDatabase();
+
+  app.listen(PORT, () => {
+    console.log(`✓ greenPlug adapter listening on ${PORT}`);
+    console.log(`[greenPlug] Manual sync endpoint: POST /internal/sync-now`);
+    console.log(`[greenPlug] Query endpoints: GET /api/points, GET /api/points/:pointId`);
+    console.log(`[greenPlug] WARNING: Automatic sync disabled - Points Service orchestrates sync schedule`);
+    startBrokerSyncConsumerWithRetry().catch((err) => {
+      console.error('[greenPlug] Failed to initialize broker sync consumer:', err.message);
+    });
   });
+}
+
+startServer().catch((err) => {
+  console.error('[greenPlug] Failed to start adapter:', err.message);
+  process.exit(1);
 });

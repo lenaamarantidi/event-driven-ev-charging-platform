@@ -86,6 +86,7 @@ services:
       - saasplug-network
     volumes:
       - mariadb-red-data:/var/lib/mysql
+      - ./Provider_Adapter_redPlug/db/init.sql:/docker-entrypoint-initdb.d/01-normalized-points.sql
     restart: unless-stopped
 
   # MariaDB for Green Provider Adapter
@@ -109,6 +110,7 @@ services:
       - saasplug-network
     volumes:
       - mariadb-green-data:/var/lib/mysql
+      - ./Provider_Adapter_greenPlug/db/init.sql:/docker-entrypoint-initdb.d/01-normalized-points.sql
     restart: unless-stopped
 
   # MariaDB for Blue Provider Adapter
@@ -132,6 +134,7 @@ services:
       - saasplug-network
     volumes:
       - mariadb-blue-data:/var/lib/mysql
+      - ./Provider_Adapter_bluePlug/db/init.sql:/docker-entrypoint-initdb.d/01-normalized-points.sql
     restart: unless-stopped
 
   # MariaDB Database for Reservation Service
