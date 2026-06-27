@@ -1,5 +1,5 @@
-@startuml UC01_View_Search_Charging_Points_Activity_Clean
-title UC01: View and Search Charging Points - Activity Diagram
+@startuml UC01_Search_View_Charging_Points_Activity
+title UC01: Search and View Charging Points - Activity Diagram
 
 !theme plain
 skinparam backgroundColor #FEFEFE
@@ -9,17 +9,16 @@ skinparam arrowColor #34495E
 
 |EV User|
 start
-:Open EV User Map Dashboard;
+:Open saasCharge Dashboard;
+:View Map Interface;
 
 |Frontend|
-:Initialize Map Interface;
-:Request Device Location;
+:Get Device Location;
 
 if (Location Permission Granted?) then (Yes)
-  :Set User Coordinates;
+  :Use Current Coordinates;
 else (No)
-  :Set Default Location (Athens);
-  :Display Location Warning;
+  :Use Default Location (Athens);
 endif
 
 :Request Charging Points Data;
@@ -28,61 +27,65 @@ endif
 :Route Request to Central Service;
 
 |Central Service|
-:Validate & Process Query Parameters;
+:Validate Query Parameters;
+:Apply Location/Filter Criteria;
 
 |Central DB|
 :Retrieve Matching Charging Points;
 
 |Central Service|
-:Return Charging Points List;
+:Return Points List with Status;
 
 |Frontend|
-if (Data Retrieval Successful?) then (Yes)
+if (Data Retrieved Successfully?) then (Yes)
   :Normalize Point Data;
-  :Calculate Distances & Sort;
+  :Calculate Distances;
+  :Render Interactive Map;
+  :Display Clustered Point Markers;
 else (No)
-  :Clear Map Markers;
   :Display Empty/Error State;
+  stop
 endif
-
-:Render Interactive Map;
-:Render Clustered Point Markers;
-:Display Charging Points on Map;
 
 |EV User|
 if (User Adjusts Filters?) then (Yes)
-  :Update Filter Selections;
+  :Modify Filter Selections\n(location, status, price, etc);
   |Frontend|
-  :Refresh Charging Points Data;
+  :Request Updated Points Data;
+  |API Gateway|
+  :Route Filtered Request;
+  |Central Service|
+  :Apply New Filters;
+  |Central DB|
+  :Retrieve Filtered Points;
+  |Frontend|
   :Update Map Display;
-else (No)
 endif
 
 |EV User|
-if (User Selects a Charging Point?) then (Yes)
-  :Click on Marker or List Item;
-
+if (Select Charging Point?) then (Yes)
   |Frontend|
-  if (Full Details Available Locally?) then (Yes)
-    :Display Charging Point Info Panel;
+  :Click on Point Marker/List Item;
+  
+  if (Full Details Cached Locally?) then (Yes)
+    :Display Info Panel\n(point data, price, status);
   else (No)
-    :Request Detailed Point Information;
     |API Gateway|
     :Route Details Request;
     |Central Service|
     :Retrieve Point Details;
     |Frontend|
-    :Display Charging Point Info Panel;
+    :Cache Point Details;
+    :Display Info Panel;
   endif
-  
+
   |EV User|
-  if (User Requests Navigation?) then (Yes)
-    |Frontend|
-    :Redirect to External Navigation App;
+  if (Request Reservation?) then (Yes)
+    :Initiate Reservation Request\n(Proceed to UC02);
     stop
   else (No)
+    :Continue Browsing;
   endif
-else (No)
 endif
 
 stop

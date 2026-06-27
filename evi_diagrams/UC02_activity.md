@@ -14,78 +14,74 @@ start
 :Submit Reservation Request;
 
 |API Gateway|
-:Route Request to Reservation Service;
+:Route request to Reservation Service;
 
 |Reservation Service|
-:Validate Request Data;
+:Validate request data;
 
-if (Is Data Valid?) then (No)
-  :Return Validation Error;
+if (Is data valid?) then (No)
+  :Return validation error;
   |EV User UI|
-  :Display Rejection Message;
+  :Display rejection message;
   stop
 else (Yes)
   |Reservation Service|
-  :Request Point Details;
+  :Request point lookup;
 
   |Central Service|
-  :Lookup Point in Central DB;
+  :Lookup point in Central DB;
 
   |Reservation Service|
-  if (Point Found?) then (No)
-    :Return Not Found Error;
+  if (Point found?) then (No)
+    :Return not found error;
     |EV User UI|
-    :Display Rejection Message;
+    :Display rejection message;
     stop
   else (Yes)
     |Reservation Service|
-    :Identify Point Provider;
+    :Determine provider from point details;
+    :Request reservation via provider adapter;
 
     |Provider Adapter (RedPlug/GreenPlug/BluePlug)|
-    :Map Request to Provider Format;
-    :Call External Provider API;
+    :Map to provider-specific format;
+    :Send reservation RPC request;
 
     |External Provider API|
-    :Process Reservation Request;
+    :Process reservation request;
 
     |Provider Adapter (RedPlug/GreenPlug/BluePlug)|
-    :Normalize Provider Response;
+    :Normalize provider response;
 
     |Reservation Service|
-    :Log Reservation Attempt;
+    :Log reservation attempt in Reservation DB;
 
-    if (Provider Reservation Status?) then (Failed)
-      :Broadcast Reservation Failure;
-      :Return Failure Response;
-      
+    if (Reservation confirmed?) then (No)
+      :Publish reservation.completed event to Analytics;
+      :Return failure response;
       |EV User UI|
-      :Display Rejection Message;
+      :Display failure message;
       stop
-      
-    else (Confirmed)
-      |Reservation Service|
-      :Calculate Reservation Expiry Time;
-      :Broadcast Reservation Success Event;
+    else (Yes)
+      :Calculate reservation expiry time;
+      :Publish reservation_successful event;
+      :Publish reservation.completed event;
 
       fork
-        |Analytics Service|
-        :Process Reservation Event;
-        :Update Usage Statistics;
-        
+        |Central Service|
+        :Update point status;
+        :Set reservation end time;
       fork again
         |Billing Service|
-        :Process Reservation Event;
-        :Record Billable Event for Provider;
-        
+        :Process billable reservation event;
       fork again
-        |Reservation Service|
-        :Return Success Response\n(with Expiry Time);
-        
-        |EV User UI|
-        :Display Success Message\n& Expiry Time;
-        :Close Reservation Panel;
+        |Analytics Service|
+        :Process reservation completion event;
       end fork
-      
+
+      |Reservation Service|
+      :Return success response with expiry time;
+      |EV User UI|
+      :Display success message and expiry time;
       stop
     endif
   endif

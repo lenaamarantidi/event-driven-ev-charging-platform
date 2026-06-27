@@ -9,62 +9,60 @@ skinparam arrowColor #34495E
 
 |Charging Points Provider|
 start
-:Fill Provider Registration Form;
-:Submit Registration Request;
+:Fill provider registration form;
+:Submit registration request;
 
 |Provider UI|
-:Validate Required Fields;
-:Forward Registration Request;
+:Validate required fields;
+:Forward registration request;
 
 |API Gateway|
-:Route Request to Provider Management;
+:Route request to Provider Management Service;
 
 |Provider Management Service|
-if (OpenAPI URL Provided?) then (Yes)
-  :Extract Endpoints via OpenAPI;
+:Resolve optional integration fields;
+if (OpenAPI URL provided?) then (Yes)
+  :Fetch OpenAPI spec from provider URL;
+  :Discover provider endpoints;
 else (No)
 endif
 
-:Validate Provider Details & Endpoints;
+:Validate provider details;
 
-if (Is Data Valid?) then (No)
-  :Return Validation Error;
+if (Is data valid?) then (No)
+  :Return validation error;
   |Provider UI|
-  :Display Form Errors;
+  :Display form errors;
   stop
 else (Yes)
   |Provider DB|
-  :Check Duplicate Name, Email, or TIN;
+  :Check duplicate provider name, email, or TIN;
   
   |Provider Management Service|
-  if (Duplicate Found?) then (Yes)
-    :Return Conflict Error;
+  if (Duplicate found?) then (Yes)
+    :Return conflict error;
     |Provider UI|
-    :Display Duplicate Error Message;
+    :Display duplicate error message;
     stop
   else (No)
     |Provider Management Service|
-    :Secure Provider Credentials;
-    :Determine Integration Status;
+    :Hash provider password;
+    :Determine adapter assignment and integration status;
     
     |Provider DB|
-    :Store New Provider Profile;
+    :Store new provider profile;
     
     |Provider Management Service|
-    :Broadcast "Provider Registered" Event;
+    :Publish provider.registered event;
     
     fork
       |Analytics Service|
-      :Process Registration Event;
-      :Update Registration Statistics;
+      :Process provider registration event;
+      :Update registration statistics;
     fork again
-      |Provider Management Service|
-      :Return Registration Success;
-      
       |Provider UI|
-      :Save Session Data Locally;
-      :Display Success Message;
-      :Navigate to Provider Dashboard;
+      :Display registration success;
+      :Prompt provider to login;
     end fork
     
     stop

@@ -10,82 +10,81 @@ skinparam arrowColor #34495E
 |saasPlug Operator|
 start
 :Open Operator Dashboard;
-:Select Filters (Period, Provider, Status);
-:Submit Dashboard Request;
+:Select filters (period, provider, status);
+:Submit dashboard request;
 
 |Operator UI|
-:Prepare Filter Parameters;
-:Request Dashboard Data;
+:Prepare filter parameters;
+:Request dashboard data;
 
 fork
   |API Gateway|
-  :Route KPI Request;
+  :Route global analytics request;
   |Analytics Service|
-  :Apply Analytics Filters;
+  :Apply analytics filters;
   |Analytics DB|
-  :Aggregate System Events;
+  :Query aggregated analytics events;
   |Analytics Service|
-  :Calculate Global KPIs\n(Applying Zero-Value Fallbacks);
-  :Return Global KPIs;
+  :Calculate global metrics;
+  :Return global analytics;
 
 fork again
   |API Gateway|
-  :Route Timeseries Request;
+  :Route timeseries analytics request;
   |Analytics Service|
-  :Apply Analytics Filters;
+  :Apply analytics filters;
   |Analytics DB|
-  :Group Events by Month;
+  :Query reservation timeseries data;
   |Analytics Service|
-  :Return Timeseries Data;
+  :Return timeseries analytics;
 
 fork again
   |API Gateway|
-  :Route Rankings Request;
+  :Route rankings analytics request;
   |Analytics Service|
-  :Apply Analytics Filters;
+  :Apply analytics filters;
   |Analytics DB|
-  :Aggregate Provider Data;
+  :Query provider ranking data;
   |Analytics Service|
-  :Calculate Provider Rankings;
-  :Return Rankings Data;
+  :Return provider rankings;
 
 fork again
   |API Gateway|
-  :Route Providers Request;
+  :Route provider list request;
   |Provider Management Service|
-  :Retrieve Active Providers;
-  :Return Provider List;
+  :Query Provider DB for active providers;
+  :Return provider list;
 
 fork again
   |API Gateway|
-  :Route Points Request;
+  :Route charging points request;
   |Central Service|
-  :Apply Status Filters;
-  :Retrieve Charging Points;
-  :Return Points List;
+  :Apply status filters;
+  :Query Central DB for charging points;
+  :Return points list;
 end fork
 
 |Operator UI|
-if (Are All Requests Successful?) then (Yes)
-  :Normalize Provider & Point Lists;
-  :Calculate Local Status Counts;
-  :Store Dashboard Data Locally;
+if (Data fetch successful?) then (Yes)
+  :Normalize provider and point lists;
+  :Compute local status counts;
+  :Store dashboard data in UI state;
   :Render Operator Dashboard;
 else (No)
-  :Display Data Fetch Error;
+  :Display data fetch error;
   stop
 endif
 
 |saasPlug Operator|
-:Review Global KPIs & Trends;
-:Review Provider Rankings & Point Status;
+:Review global KPIs and trends;
+:Review provider rankings and point status;
 
-if (Change Filters?) then (Yes)
+if (Change filters?) then (Yes)
   |Operator UI|
-  :Update Filter State;
-  :Trigger Data Refresh;
+  :Update filter state;
+  :Trigger data refresh;
 else (No)
-  :Maintain Current View;
+  :Maintain current view;
 endif
 
 stop
