@@ -262,17 +262,14 @@
     }
     
     #search-results-dropdown {
-      position: absolute;
-      top: 100%;
-      left: 0;
-      right: 0;
-      background: white;
-      border: 1px solid #ddd;
-      border-radius: 4px;
-      max-height: 300px;
-      overflow-y: auto;
-      z-index: 100;
-      box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+      position: fixed !important;
+      background: white !important;
+      border: 2px solid #667eea !important;
+      border-radius: 4px !important;
+      max-height: 300px !important;
+      overflow-y: auto !important;
+      z-index: 99999 !important;
+      box-shadow: 0 8px 24px rgba(102, 126, 234, 0.3) !important;
     }
 
     /* Modal overlay */
@@ -543,7 +540,6 @@
           <button onclick="searchByAddress()" style="height: 50px; padding: 0 16px; font-size: 14px; font-weight: 600; background: #667eea; color: white; border: none; border-radius: 4px; cursor: pointer; white-space: nowrap;">Search Nearby</button>
         </div>
       </div>
-      <div id="search-results-dropdown" style="display: none; background: white; border: 1px solid #ddd; border-radius: 4px; max-height: 250px; overflow-y: auto; margin-left: 120px; box-shadow: 0 4px 8px rgba(0,0,0,0.1);"></div>
     </div>
 
     <div class="filters-group">
@@ -1226,6 +1222,14 @@
         return;
       }
       
+      // Position dropdown right under input
+      const input = document.getElementById('address-search');
+      const rect = input.getBoundingClientRect();
+      dropdown.style.left = rect.left + 'px';
+      dropdown.style.top = (rect.bottom + 4) + 'px';
+      dropdown.style.width = rect.width + 'px';
+      console.log('[searchAddressRealtime] Positioned dropdown at', rect.left, rect.bottom);
+      
       // Debounce search - wait 300ms before searching
       searchTimeout = setTimeout(async () => {
         try {
@@ -1463,5 +1467,9 @@ document.getElementById('connector-filter').value = '';
     });
   </script>
 </div>
+
+<!-- Floating Address Results Dropdown -->
+<div id="search-results-dropdown" style="position: fixed; display: none; background: white; border: 2px solid #667eea; border-radius: 4px; max-height: 300px; overflow-y: auto; z-index: 99999; box-shadow: 0 8px 24px rgba(102, 126, 234, 0.3);"></div>
+
 </body>
 </html>
