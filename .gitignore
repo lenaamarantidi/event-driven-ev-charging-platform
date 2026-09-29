@@ -10,3 +10,23 @@
 /httpRequests/
 .idea/
 **/node_modules/
+
+# Environment variables and secrets
+.env
+**/.env
+
+# Keep configuration templates
+!.env.example
+!**/.env.example
+!.env.template
+!**/.env.template
+
+# OS files
+.DS_Store
+
+# Runtime logs
+logs/
+*.log
+
+# Visual Paradigm backup files
+*.vpp.bak_*
